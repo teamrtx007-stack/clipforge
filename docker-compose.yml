@@ -1,0 +1,29 @@
+services:
+  clipforge:
+    build: .
+    ports:
+      # Reachable from this computer only. To open it to your network or the internet:
+      # change this to "8000:8000", set APP_PASSWORD, and delete the ALLOW_NO_PASSWORD line below.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      # Safe only because the port above is bound to 127.0.0.1.
+      ALLOW_NO_PASSWORD: ${ALLOW_NO_PASSWORD:-1}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      # Optional AI titles from a local model, still free:
+      #   1. docker compose --profile llm up -d
+      #   2. docker compose exec ollama ollama pull llama3.2:3b
+      #   3. put LLM_BASE_URL=http://ollama:11434/v1 and LLM_MODEL=llama3.2:3b in .env, then restart
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.40.16
+    profiles: ["llm"]
+    volumes:
+      - ./data/ollama:/root/.ollama
+    restart: unless-stopped

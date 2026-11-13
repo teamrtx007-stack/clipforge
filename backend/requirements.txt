@@ -1,0 +1,6 @@
+fastapi==0.162.7
+uvicorn[standard]==0.54.0
+faster-whisper==1.2.1
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
+streamlink==8.6.3
