@@ -79,6 +79,7 @@ export function penalty(
   strikes: number,
 ): { cooldownMs: number; reason: string } | null {
   if (status === 401 || status === 403) return { cooldownMs: 24 * HOUR, reason: "key refused: rotate it" };
+  if (status === 402) return { cooldownMs: 24 * HOUR, reason: "needs paid credits" };
   if (status === 429) {
     const backoff = Math.min(MINUTE * 2 ** strikes, HOUR); // a spent daily quota keeps backing off
     return {
