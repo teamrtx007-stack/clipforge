@@ -4,6 +4,7 @@ Expensive stages cache their output next to the video (audio.wav, loudness.npy, 
 so a retry after a crash picks up where the last run stopped.
 """
 import json
+import logging
 import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import camera, captions, db, describe, fetch, files, highlights, jobs, media, transcribe
+from . import camera, captions, db, describe, fetch, files, highlights, jobs, media, scenes, transcribe
 from .config import clip_dir, settings, source_dir
 from .media import HOP
 from .render import render
@@ -34,6 +35,25 @@ def _save_json(path: Path, value) -> None:
 def _save_npy(path: Path, value) -> None:
     with path.open("wb") as f:
         np.save(f, value)
+
+
+log = logging.getLogger("clipforge.pipeline")
+
+
+def find_scenes(video: Path, info: media.Probe, folder: Path) -> dict | None:
+    """Cuts and context changes, cached in scenes.json. None when switched off (SCENE_DETECTION=0), for a
+    video without pictures, or when detection fails: clips are then chosen from speech and sound only, as before."""
+    if not settings.scene_detection or not info.width or not info.height:
+        return None
+    path = folder / "scenes.json"
+    if path.exists() and json.loads(path.read_text()).get("version") != scenes.VERSION:
+        path.unlink()  # made by an older detector
+    try:
+        return _cached(path, lambda: scenes.detect(video, info.duration, info.width, info.height),
+                       _save_json, lambda p: json.loads(p.read_text()))
+    except media.MediaError as exc:
+        log.warning("Scene detection failed, choosing clips without it: %s", exc)
+        return None
 
 
 def source_video(src: dict) -> Path:
@@ -178,6 +198,8 @@ def analyze_source(source_id: int) -> None:
 
         for file_type, name in (("loudness", "loudness.npy"), ("transcript", "transcript.json")):
             files.save(file_type, source_id, folder / name)
+        stage("Finding scene changes", 0.86)
+        found_scenes = find_scenes(video, info, folder)
         stage("Finding highlights", 0.88)
         meta = src["meta"]
         chat_path = folder / "chat.npy"
@@ -187,7 +209,7 @@ def analyze_source(source_id: int) -> None:
         found = highlights.find(
             transcript, loudness, info.duration, highlights.LENGTHS[meta.get("length", "medium")],
             pool, must_include=meta.get("peak"),
-            chat=np.load(chat_path) if chat_path.exists() else None,
+            chat=np.load(chat_path) if chat_path.exists() else None, scenes=found_scenes,
         )
         stage("Writing titles", 0.94)
         described = describe.describe(found)[:max_clips]
