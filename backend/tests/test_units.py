@@ -1,4 +1,6 @@
 """Behavior of the pure modules: scoring, captions, camera, live signals, parsing."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -40,8 +42,19 @@ class TestHighlights:
         found = highlights.find(_transcript(_filler_talk(600)), np.full(1201, -20.0), 600, LENGTHS["short"], 10)
         assert len(found) == 10
         spans = sorted((c.start, c.end) for c in found)
-        assert all(a[1] <= b[0] for a, b in zip(spans, spans[1:]))
+        assert all(a[1] - b[0] <= highlights.LEAD_IN + highlights.TAIL + 1e-6 for a, b in zip(spans, spans[1:])), \
+            "clips share at most their padding"
         assert all(15 <= c.end - c.start <= 30 for c in found)
+
+    def test_clip_edges_leave_room_around_the_words(self):
+        tr = _transcript([(t, line) for t, line in _filler_talk(120) if 10 <= t < 30])  # 20 s of talk in 2 min
+        words = highlights.words_from(tr)
+        found = highlights.find(tr, np.full(241, -20.0), 120, LENGTHS["short"], 1)
+        assert found and found[0].end - found[0].start <= LENGTHS["short"].max
+        for c in found:
+            inside = [w for w in words if c.start <= w.start and w.end <= c.end]
+            assert inside[0].start - c.start >= 0.2 or c.start == 0, "the first syllable is not clipped"
+            assert c.end - inside[-1].end >= 0.4, "the last syllable rings out"
 
     def test_no_speech_falls_back_to_loudness(self):
         loud = np.full(241, -30.0)
@@ -253,3 +266,26 @@ def test_captions_never_burn_in_empty_boxes():
     ass = captions.build_ass([Word(0, 1, "你好"), Word(1, 2, "देखो"), Word(2, 3, "سلام"), Word(3, 4, "ok")], style)
     assert "देखो" in ass and "سلام" in ass and "ok" in ass, "Hindi, Urdu and Latin have bundled fonts"
     assert "你" not in ass, "a script with no bundled font is left out rather than drawn as boxes"
+
+
+def test_a_trim_through_a_word_keeps_its_caption():
+    words = [Word(9.8, 10.4, "hello"), Word(10.5, 11.0, "there"), Word(11.6, 12.4, "friend"), Word(12.5, 13.0, "gone")]
+    got = highlights.words_in(words, 10.0, 12.2)
+    assert [w.text for w in got] == ["hello", "there", "friend"]
+    assert got[0].start == 0 and abs(got[-1].end - 2.2) < 1e-9, "times are clipped to the clip"
+
+
+def test_ffmpeg_failing_halfway_leaves_no_partial_file(tmp_path, monkeypatch):
+    from app import media
+
+    def dies_halfway(cmd):  # e.g. the disk fills up mid-write
+        Path(cmd[-1]).write_bytes(b"half a file")
+        raise media.MediaError("No space left on device")
+
+    monkeypatch.setattr(media, "run", dies_halfway)
+    for make in (lambda: media.extract_audio(tmp_path / "v.mp4", tmp_path / "audio.wav"),
+                 lambda: media.thumbnail(tmp_path / "v.mp4", 1.0, tmp_path / "thumb.jpg"),
+                 lambda: media.compress_audio(tmp_path / "a.wav", 0, 10, tmp_path / "chunk.mp3")):
+        with pytest.raises(media.MediaError):
+            make()
+    assert list(tmp_path.iterdir()) == []

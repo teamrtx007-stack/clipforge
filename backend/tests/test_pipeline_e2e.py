@@ -1,7 +1,6 @@
 """Upload-to-MP4 on a real video: transcribe, find highlights, track the face, render."""
 import json
 import shutil
-import subprocess
 
 import numpy as np
 
@@ -107,3 +106,34 @@ def test_deleting_a_source_mid_job_stops_it_quietly(talking_video, monkeypatch):
     _drain()
     job = db.one("SELECT * FROM jobs WHERE kind = 'analyze_source' AND target_id = ?", sid)
     assert job["status"] == "done" and not source_dir(sid).exists()
+
+
+def test_ai_score_decides_which_clips_make_the_cut(talking_video, override, monkeypatch, tmp_path):
+    """With a text provider, extra candidates go to the AI in one request and its score picks the winner."""
+    import re
+    import subprocess
+
+    looped = tmp_path / "twice.mp4"  # 88 s: room for more than one 15-30 s candidate
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-stream_loop", "1", "-i", str(talking_video), "-c", "copy",
+                    str(looped)], check=True)
+
+    from app import ai
+    from app.config import Provider
+
+    override(text_providers=(Provider("custom", "http://127.0.0.1:9", "m"),))
+    prompts = []
+
+    def fake_ai(prompt, max_tokens=4000):
+        prompts.append(prompt)
+        ids = [int(i) for i in re.findall(r"^Clip (\d+):", prompt, re.M)]
+        return {"clips": [{"id": i, "title": f"AI pick {i}", "virality": 100 if i == ids[-1] else 0} for i in ids]}, None
+
+    monkeypatch.setattr(ai, "chat_json", fake_ai)
+    sid = _make_source(looped, max_clips=1, auto_render=False)
+    jobs.enqueue("analyze_source", sid)
+    _drain()
+    clips = db.rows("SELECT * FROM clips WHERE source_id = ?", sid)
+    assert len(prompts) == 1, "one AI request per video"
+    pool = len(re.findall(r"^Clip \d+:", prompts[0], re.M))
+    assert pool >= 2, "the AI saw more candidates than the clips kept"
+    assert [c["title"] for c in clips] == [f"AI pick {pool - 1}"], "the AI's favourite made the cut"

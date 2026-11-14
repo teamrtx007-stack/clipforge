@@ -68,9 +68,10 @@ backend/app/
   jobs.py        queue (enqueue, claim, finish) and worker threads
   pipeline.py    analyze_source and render_clip job handlers
   media.py       ffprobe, audio extraction, loudness curve, segment concat
-  transcribe.py  faster-whisper with word timestamps
+  transcribe.py  faster-whisper with word timestamps; optional cloud Whisper chain, per 10-minute chunk
   highlights.py  candidate windows, scoring, selection (pure)
-  describe.py    titles, descriptions, hashtags (heuristic + optional LLM)
+  describe.py    titles, descriptions, hashtags (heuristic + optional AI, which also reranks the clips)
+  ai.py          free-tier AI adapters (Gemini, Groq, Cloudflare, OpenRouter): retries, rate limits, fallback
   camera.py      YuNet face detection and the smoothed crop and zoom path
   captions.py    animated ASS subtitles (pure)
   templates.py   template registry
@@ -145,7 +146,7 @@ The plan builds exactly the feature list in the brief. It adds nothing for billi
 | Render | Disk full, ffmpeg exits non-zero | Last lines of ffmpeg stderr go to `Clip.error` | Failed clip with a retry button |
 | Delete | Project deleted while its job runs | The next progress write finds no row and raises `Gone`; the job ends and deletes what it wrote | Nothing, the project is gone |
 | Edit | Clip trimmed while it renders | The render marks it `ready` only if start, end and template still match | The clip shows "Edited. Render again" |
-| LLM | Endpoint down or slow | 30 s timeout, then the heuristic writes the titles | Titles still appear |
+| AI | Provider down, slow, out of free quota, or key refused | 90 s timeout, retries for 5xx, one wait for a short 429, then the next provider; the heuristic and local Whisper are the last step | Titles and transcripts still appear |
 | Live | Recorder process dies | Supervisor sees the exit and goes back to polling | Status flips to offline or error |
 | Live | Stream stalls with the connection open | 15 s read timeout in ffmpeg, 30 s in streamlink | Status flips to offline, then polling resumes |
 | Live | Busy CPU while an upload transcribes | A second worker takes only live jobs | Live clips still appear in minutes |

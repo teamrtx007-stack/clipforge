@@ -9,6 +9,7 @@ Keys come from the environment through `config.settings` and are never logged or
 Run `python -m app.ai` to check every configured provider with one tiny request each.
 """
 import base64
+import http.client
 import json
 import logging
 import re
@@ -43,8 +44,11 @@ def _post(url: str, body: bytes, headers: dict[str, str], name: str) -> dict:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
             detail = exc.read(500).decode(errors="replace")
+            if secret := headers.get("Authorization", "").removeprefix("Bearer "):
+                detail = detail.replace(secret, "[key]")  # some APIs echo the key they refused
             if exc.code == 429:
-                wait = float(exc.headers.get("Retry-After") or 0)
+                retry_after = exc.headers.get("Retry-After") or "0"
+                wait = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else 0  # may be a date
                 if not waited and 0 < wait <= MAX_WAIT:
                     waited = True
                     time.sleep(wait)
@@ -54,7 +58,7 @@ def _post(url: str, body: bytes, headers: dict[str, str], name: str) -> dict:
                 raise AIError(f"{name}: the API key or token was refused ({exc.code}); check it in .env") from exc
             if exc.code < 500 or attempt == 2:
                 raise AIError(f"{name}: HTTP {exc.code}: {_clean(detail)}") from exc
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        except (OSError, http.client.HTTPException) as exc:  # refused, reset, timed out, cut off midway
             if attempt == 2:
                 raise AIError(f"{name}: could not connect ({getattr(exc, 'reason', exc)})") from exc
         except json.JSONDecodeError as exc:
@@ -72,6 +76,8 @@ def _clean(text: str) -> str:
 def _chat(p: Provider, prompt: str, max_tokens: int) -> str:
     body = {"model": p.model, "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.4, "max_tokens": max_tokens}
+    if p.name in ("gemini", "groq"):  # thinking models: their thinking counts against max_tokens
+        body["reasoning_effort"] = "low"
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {p.key}"} if p.key else {})}
     answer = _post(f"{p.base_url}/chat/completions", json.dumps(body).encode(), headers, p.name)
     try:
@@ -83,7 +89,7 @@ def _chat(p: Provider, prompt: str, max_tokens: int) -> str:
     return content
 
 
-def chat_json(prompt: str, max_tokens: int = 4000) -> tuple[dict, Provider]:
+def chat_json(prompt: str, max_tokens: int = 8000) -> tuple[dict, Provider]:
     """Ask each configured text provider in turn for a JSON object. Raises AIError when none answers."""
     failures = []
     for p in settings.text_providers:

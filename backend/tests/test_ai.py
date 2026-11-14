@@ -1,6 +1,5 @@
 """AI provider adapters against a local fake server: request shapes, retries, rate limits and fallback.
 No real API is called and no key is needed."""
-import functools
 import http.server
 import json
 import threading
@@ -60,6 +59,7 @@ def test_text_falls_back_past_quota_and_bad_keys(api, override):
     assert [path for path, _, _ in api.seen] == ["/a/chat/completions", "/b/chat/completions", "/c/chat/completions"]
     sent = json.loads(api.seen[2][2])
     assert sent["model"] == "m3" and api.seen[2][1]["Authorization"] == "Bearer key-c"
+    assert json.loads(api.seen[1][2])["reasoning_effort"] == "low" and "reasoning_effort" not in sent
 
 
 def test_errors_name_the_provider_and_never_the_key(api, override):
@@ -154,3 +154,13 @@ def test_speech_falls_back_per_chunk_and_never_pays_twice(override, monkeypatch,
     monkeypatch.setattr(ai, "transcribe_chunk", lambda *a: pytest.fail("a saved chunk was sent again"))
     monkeypatch.setattr(transcribe, "transcribe", lambda *a, **k: pytest.fail("a saved chunk was transcribed again"))
     assert transcribe.transcribe_file(wav, 44.0, tmp_path) == out
+
+
+def test_echoed_keys_are_masked_and_date_retry_after_is_handled(api, override):
+    override(text_providers=(Provider("openrouter", _url(api, "a"), "m", "sk-or-secret"),
+                             Provider("groq", _url(api, "b"), "m", "gk")))
+    api.script = {"/a/chat/completions": [(400, b"bad request for key sk-or-secret", {})],
+                  "/b/chat/completions": [(429, b"slow", {"Retry-After": "Fri, 14 Nov 2026 12:00:00 GMT"})]}
+    with pytest.raises(ai.AIError) as err:
+        ai.chat_json("hi")
+    assert "sk-or-secret" not in str(err.value) and "[key]" in str(err.value) and "429" in str(err.value)

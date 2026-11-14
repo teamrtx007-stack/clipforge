@@ -222,8 +222,7 @@ def render_clip(clip_id: int) -> None:
         ass = None
         if template.captions:
             transcript = json.loads((sfolder / "transcript.json").read_text())
-            words = [highlights.Word(w.start - start, w.end - start, w.text)
-                     for w in highlights.words_from(transcript) if w.start >= start and w.end <= end]
+            words = highlights.words_in(highlights.words_from(transcript), start, end)
             ass = folder / "captions.ass"
             ass.write_text(captions.build_ass(words, template.captions))
 
