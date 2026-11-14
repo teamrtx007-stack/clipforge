@@ -50,13 +50,13 @@ def test_text_falls_back_past_quota_and_bad_keys(api, override):
                              Provider("groq", _url(api, "b"), "m2", "secret-b"),
                              Provider("openrouter", _url(api, "c"), "m3", "key-c")))
     api.script = {
-        "/a/chat/completions": [(429, {"error": "quota"}, {"Retry-After": "3600"})],  # daily quota: move on
+        "/a/models/m1:generateContent": [(429, {"error": "quota"}, {"Retry-After": "3600"})],  # daily quota: move on
         "/b/chat/completions": [(401, {"error": "bad key"}, {})],
         "/c/chat/completions": [_reply('Sure! ```json\n{"clips": [{"id": 0}]}\n```')],
     }
     result, provider = ai.chat_json("hi")
     assert result == {"clips": [{"id": 0}]} and provider.name == "openrouter"
-    assert [path for path, _, _ in api.seen] == ["/a/chat/completions", "/b/chat/completions", "/c/chat/completions"]
+    assert [path for path, _, _ in api.seen] == ["/a/models/m1:generateContent", "/b/chat/completions", "/c/chat/completions"]
     sent = json.loads(api.seen[2][2])
     assert sent["model"] == "m3" and api.seen[2][1]["Authorization"] == "Bearer key-c"
     assert json.loads(api.seen[1][2])["reasoning_effort"] == "low" and "reasoning_effort" not in sent
@@ -164,3 +164,49 @@ def test_echoed_keys_are_masked_and_date_retry_after_is_handled(api, override):
     with pytest.raises(ai.AIError) as err:
         ai.chat_json("hi")
     assert "sk-or-secret" not in str(err.value) and "[key]" in str(err.value) and "429" in str(err.value)
+
+
+def test_gemini_uses_its_native_api_with_the_key_in_a_header(api, override):
+    """New "AQ." Gemini keys are refused by the OpenAI-compatible endpoint and as a Bearer token."""
+    override(text_providers=(Provider("gemini", _url(api, "g"), "gemini-2.5-flash", "AQ.secret"),))
+    api.script = {"/g/models/gemini-2.5-flash:generateContent": [(200, {"candidates": [{"content": {"parts": [
+        {"text": "let me think", "thought": True}, {"text": '{"clips": []}'}]}}]}, {})]}
+    assert ai.chat_json("hi")[0] == {"clips": []}
+    _, headers, body = api.seen[0]
+    assert headers["X-Goog-Api-Key"] == "AQ.secret" and "Authorization" not in headers
+    sent = json.loads(body)
+    assert sent["contents"][0]["parts"][0]["text"] == "hi" and sent["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 512
+
+
+def test_gateway_text_and_speech(api, override, monkeypatch, tmp_path):
+    """Through the Supabase gateway the worker holds one token and no provider keys."""
+    url = _url(api, "functions/v1/ai-gateway")
+    override(text_providers=(Provider("gateway", f"{url}/v1", "auto", "gw-token"),),
+             gateway_url=url, gateway_token="gw-token", transcribe_language="hi")
+    api.script = {
+        "/functions/v1/ai-gateway/v1/chat/completions": [_reply('{"ok": 1}')],
+        "/functions/v1/ai-gateway/v1/audio/transcriptions": [(200, {"provider": "groq", "language": "hi", "segments": [
+            {"start": 0.5, "end": 2.0, "text": "नमस्ते", "words": [{"word": "नमस्ते", "start": 0.6, "end": 1.2}]}]}, {})],
+    }
+    assert ai.chat_json("hi")[0] == {"ok": 1}
+    audio = tmp_path / "c.mp3"
+    audio.write_bytes(b"ID3")
+    out = ai.transcribe_chunk("gateway", audio, offset=600)
+    assert out["segments"][0]["words"][0] == {"start": 600.6, "end": 601.2, "word": "नमस्ते"}
+    for _, headers, body in api.seen:
+        assert headers["Authorization"] == "Bearer gw-token"
+    assert b'name="language"\r\n\r\nhi' in api.seen[1][2]
+
+
+def test_check_probes_the_gateway_keys(api, override, capsys):
+    url = _url(api, "gw")
+    override(text_providers=(Provider("gateway", f"{url}/v1", "auto", "gw-token"),), gateway_url=url, gateway_token="gw-token")
+    api.script = {
+        "/gw/v1/chat/completions": [_reply('{"ok": true}')],
+        "/gw/v1/health/probe": [(200, {"results": [{"provider": "groq", "key_id": "3e9b3b9bbe05", "ok": True},
+                                                   {"provider": "zai", "key_id": "de6ba94d58f5", "ok": False,
+                                                    "error": "HTTP 401: invalid key [redacted]"}]}, {})],
+    }
+    assert ai.check() == 1, "one refused key is a failure"
+    out = capsys.readouterr().out
+    assert "ok    groq key 3e9b3b9bbe05" in out and "FAIL  zai key de6ba94d58f5: HTTP 401" in out and "gw-token" not in out

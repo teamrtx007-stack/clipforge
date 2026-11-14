@@ -44,7 +44,7 @@ def _post(url: str, body: bytes, headers: dict[str, str], name: str) -> dict:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
             detail = exc.read(500).decode(errors="replace")
-            if secret := headers.get("Authorization", "").removeprefix("Bearer "):
+            if secret := headers.get("Authorization", "").removeprefix("Bearer ") or headers.get("x-goog-api-key"):
                 detail = detail.replace(secret, "[key]")  # some APIs echo the key they refused
             if exc.code == 429:
                 retry_after = exc.headers.get("Retry-After") or "0"
@@ -73,7 +73,23 @@ def _clean(text: str) -> str:
 
 # Text
 
+def _gemini(p: Provider, prompt: str, max_tokens: int) -> str:
+    """Gemini's native API: new "AQ." keys are refused by its OpenAI-compatible endpoint."""
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": max_tokens,
+                                 **({"thinkingConfig": {"thinkingBudget": 512}} if p.model.startswith("gemini-2.5") else {})}}
+    answer = _post(f"{p.base_url}/models/{p.model}:generateContent", json.dumps(body).encode(),
+                   {"Content-Type": "application/json", "x-goog-api-key": p.key or ""}, p.name)
+    parts = ((answer.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+    content = "".join(part.get("text", "") for part in parts if not part.get("thought"))
+    if not content.strip():
+        raise AIError(f"{p.name}: empty answer (the model may have refused or run out of tokens)")
+    return content
+
+
 def _chat(p: Provider, prompt: str, max_tokens: int) -> str:
+    if p.name == "gemini":
+        return _gemini(p, prompt, max_tokens)
     body = {"model": p.model, "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.4, "max_tokens": max_tokens}
     if p.name in ("gemini", "groq"):  # thinking models: their thinking counts against max_tokens
@@ -169,7 +185,20 @@ def _cloudflare(audio: Path, offset: float) -> dict:
             "segments": _segments(result["segments"], None, offset)}
 
 
-SPEECH = {"groq": _groq, "cloudflare": _cloudflare}
+def _gateway(audio: Path, offset: float) -> dict:
+    """The ClipForge AI gateway picks the provider and key; its answer is already in this shape."""
+    if not (settings.gateway_url and settings.gateway_token):
+        raise AIError("gateway: GATEWAY_URL and GATEWAY_TOKEN must both be set")
+    fields = {"language": settings.transcribe_language} if settings.transcribe_language else {}
+    body, content_type = _multipart(fields, audio)
+    r = _post(f"{settings.gateway_url}/v1/audio/transcriptions", body,
+              {"Content-Type": content_type, "Authorization": f"Bearer {settings.gateway_token}"}, "gateway")
+    if not isinstance(r.get("segments"), list):
+        raise AIError("gateway: the answer had no segments")
+    return {"language": r.get("language"), "segments": _segments(r["segments"], None, offset)}
+
+
+SPEECH = {"gateway": _gateway, "groq": _groq, "cloudflare": _cloudflare}
 
 
 def transcribe_chunk(name: str, audio: Path, offset: float) -> dict:
@@ -183,8 +212,9 @@ def check() -> int:
     """One tiny request per configured provider. Prints names, models and outcomes, never keys."""
     print(f"Speech to text order: {', '.join(settings.transcribe_providers)}")
     if not settings.text_providers:
-        print("No AI text provider is configured. Set GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, "
-              "CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN, or LLM_BASE_URL + LLM_MODEL.")
+        print("No AI text provider is configured. Set GATEWAY_URL + GATEWAY_TOKEN (recommended: keys stay in "
+              "Supabase), or GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, CLOUDFLARE_ACCOUNT_ID + "
+              "CLOUDFLARE_API_TOKEN, or LLM_BASE_URL + LLM_MODEL.")
     failed = 0
     for p in settings.text_providers:
         started = time.monotonic()
@@ -194,7 +224,26 @@ def check() -> int:
         except AIError as exc:
             failed += 1
             print(f"  FAIL  {p.name} ({p.model}): {exc}")
+    if settings.gateway_url and settings.gateway_token:
+        failed += _check_gateway()
     return 1 if failed else 0
+
+
+def _check_gateway() -> int:
+    """Ask the gateway to test each of its keys with one tiny request. Prints key ids, never keys."""
+    print("Gateway keys (one tiny request each):")
+    try:
+        r = _post(f"{settings.gateway_url}/v1/health/probe", b"{}",
+                  {"Content-Type": "application/json", "Authorization": f"Bearer {settings.gateway_token}"}, "gateway")
+    except AIError as exc:
+        print(f"  FAIL  {exc}")
+        return 1
+    for k in r.get("results", []):
+        status = "ok  " if k.get("ok") else "FAIL"
+        print(f"  {status}  {k.get('provider')} key {k.get('key_id')}" + ("" if k.get("ok") else f": {k.get('error')}"))
+    if not r.get("results"):
+        print("  FAIL  the gateway has no provider keys; set them with supabase secrets set")
+    return sum(1 for k in r.get("results", []) if not k.get("ok")) + (0 if r.get("results") else 1)
 
 
 if __name__ == "__main__":

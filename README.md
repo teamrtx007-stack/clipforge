@@ -116,6 +116,8 @@ All settings are environment variables.
 
 ## AI providers
 
+**Recommended: keep every key in Supabase.** The [AI gateway](docs/AI_GATEWAY.md) is a Supabase Edge Function that holds the keys as secrets, rotates between several keys per provider, cools down rate-limited keys and falls back across providers. ClipForge then needs only `GATEWAY_URL` and `GATEWAY_TOKEN`.
+
 Everything works without a key. Keys add better titles, AI clip scoring in any language, and faster speech to text on computers without a GPU. Put them in `.env` (copy `.env.example`); `.env` is ignored by Git. Then check them with one tiny request each:
 
 ```bash
@@ -125,7 +127,7 @@ docker compose exec clipforge python -m app.ai
 | Task | Default | Free cloud options, in the order tried |
 |---|---|---|
 | Speech to text | Local faster-whisper | Groq `whisper-large-v3-turbo`, Cloudflare `@cf/openai/whisper-large-v3-turbo` |
-| Titles, descriptions, hashtags | Local heuristic | Gemini `gemini-2.5-flash`, Groq `openai/gpt-oss-120b`, Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, OpenRouter `openrouter/free` |
+| Titles, descriptions, hashtags | Local heuristic | Gemini `gemini-2.5-flash` (native API, so new `AQ.` keys work), Z.ai `glm-4.5-flash` (gateway only), Groq `openai/gpt-oss-120b`, Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, OpenRouter `openrouter/free` |
 | Clip scoring | Local signals | The same text provider rates each candidate; its score is 40% of the final score and picks which clips make the cut |
 | Live moment detection | Local (audio, Whisper `tiny`, chat) | None: a cloud call every few seconds per stream would spend a free quota in hours |
 

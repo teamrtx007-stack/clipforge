@@ -10,3 +10,8 @@ data/
 .env
 .env.*
 !.env.example
+
+# Supabase: local secrets files and CLI state
+supabase/.env*
+supabase/.temp/
+supabase/.branches/
