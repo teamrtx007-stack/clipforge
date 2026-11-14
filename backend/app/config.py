@@ -1,5 +1,6 @@
 """Settings, read once from environment variables, and the on-disk layout derived from them."""
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +34,35 @@ SPEECH_PROVIDERS = ("local", "gateway", "groq", "cloudflare")
 
 
 @dataclass(frozen=True)
+class Bucket:
+    """One S3-compatible bucket (Cloudflare R2 or Backblaze B2). The secret never appears in repr or logs."""
+    endpoint: str
+    key_id: str
+    bucket: str
+    region: str
+    secret: str = field(repr=False)
+    free_bytes: int = 10 * 1000**3  # both providers give 10 GB free; counted in decimal GB to stay on the safe side
+
+
+STORAGE_PROVIDERS = ("r2", "b2")
+
+
+def _bucket(env, prefix: str, region: str) -> Bucket | None:
+    names = ("ENDPOINT_URL", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "BUCKET_NAME")
+    values = {n: env(f"{prefix}_{n}") for n in names}
+    if not any(values.values()):
+        return None
+    if missing := [f"{prefix}_{n}" for n, v in values.items() if not v]:
+        raise ValueError(f"{prefix} storage is half configured; also set {', '.join(missing)}")
+    # B2 signs with the region in its endpoint (s3.<region>.backblazeb2.com); read it from there if unset.
+    endpoint_region = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", values["ENDPOINT_URL"])
+    return Bucket(values["ENDPOINT_URL"].rstrip("/"), values["ACCESS_KEY_ID"], values["BUCKET_NAME"],
+                  env(f"{prefix}_REGION") or (endpoint_region.group(1) if endpoint_region else region),
+                  values["SECRET_ACCESS_KEY"],
+                  int(float(env(f"{prefix}_FREE_GB", "10")) * 1000**3))
+
+
+@dataclass(frozen=True)
 class Settings:
     data_dir: Path
     password: str | None = field(repr=False)
@@ -49,6 +79,13 @@ class Settings:
     cloudflare_account_id: str | None
     cloudflare_token: str | None = field(repr=False)
     cloudflare_whisper_model: str
+    buckets: dict[str, Bucket]  # configured providers by name: "r2", "b2"
+    storage_primary: str  # "local" or a provider name
+    storage_backup: str | None
+    source_keep_hours: float  # temporary source files, counted from the end of processing
+    clip_keep_days: float  # finished clips in primary storage; 0 keeps them
+    backup_keep_days: float  # redundant backup copies; a last copy is never deleted
+    storage_stop_at_limit: bool  # refuse uploads past a provider's free allowance instead of paying for them
     max_upload_bytes: int
     workers: int
     live_enabled: bool
@@ -77,6 +114,27 @@ def _text_providers(env) -> tuple[Provider, ...]:
     return tuple(found[n] for n in chosen if n in found)
 
 
+def _storage(env) -> dict:
+    """R2 is primary and B2 is backup by default, each only when its variables are set; STORAGE_PRIMARY and
+    STORAGE_BACKUP can pick otherwise. With no bucket configured, everything stays on this computer, as before."""
+    buckets = {name: b for name, region in (("r2", "auto"), ("b2", "us-east-005"))
+               if (b := _bucket(env, name.upper(), region))}
+    primary = (env("STORAGE_PRIMARY") or ("r2" if "r2" in buckets else "local")).lower()
+    backup = (env("STORAGE_BACKUP") or ("b2" if "b2" in buckets and primary != "b2" else "")).lower() or None
+    for role, name in (("STORAGE_PRIMARY", primary), ("STORAGE_BACKUP", backup)):
+        if name not in (None, "local", "none") and name not in buckets:
+            raise ValueError(f"{role}={name}, but {name.upper()}_* variables are not set")
+    if backup in ("none", primary) or primary == "local":  # a backup copies the primary copy, so it needs one
+        backup = None
+    return {
+        "buckets": buckets, "storage_primary": primary, "storage_backup": backup,
+        "source_keep_hours": float(env("SOURCE_KEEP_HOURS", "24")),
+        "clip_keep_days": float(env("CLIP_KEEP_DAYS", "7")),
+        "backup_keep_days": float(env("BACKUP_KEEP_DAYS", "30")),
+        "storage_stop_at_limit": env("STORAGE_STOP_AT_LIMIT", "1") != "0",
+    }
+
+
 def _load() -> Settings:
     env = os.environ.get
     return Settings(
@@ -95,6 +153,7 @@ def _load() -> Settings:
         cloudflare_account_id=env("CLOUDFLARE_ACCOUNT_ID") or None,
         cloudflare_token=env("CLOUDFLARE_API_TOKEN") or None,
         cloudflare_whisper_model=env("CLOUDFLARE_WHISPER_MODEL", "@cf/openai/whisper-large-v3-turbo"),
+        **_storage(env),
         max_upload_bytes=int(env("MAX_UPLOAD_MB", "8192")) * 1024 * 1024,
         workers=max(1, int(env("WORKERS", "1"))),
         live_enabled=env("LIVE_ENABLED", "1") != "0",

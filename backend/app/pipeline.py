@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import camera, captions, db, describe, fetch, highlights, jobs, media, transcribe
+from . import camera, captions, db, describe, fetch, files, highlights, jobs, media, transcribe
 from .config import clip_dir, settings, source_dir
 from .media import HOP
 from .render import render
@@ -66,16 +66,32 @@ def discard_interrupted_uploads() -> None:
 
 
 def remove_files(source_ids: list[int], clip_ids: list[int]) -> None:
+    """The user deleted these: local files and every stored copy go."""
     for sid in source_ids:
         shutil.rmtree(source_dir(sid), ignore_errors=True)
+        files.delete_all("source", sid)
     for cid in clip_ids:
         shutil.rmtree(clip_dir(cid), ignore_errors=True)
+        files.delete_all("clip", cid)
+
+
+EXPIRED = "The original video was deleted {hours:g} hours after processing, as set by SOURCE_KEEP_HOURS. Add it again."
+
+
+def _work_files(source_id: int, video: Path) -> None:
+    """Local working copies of a source and its analysis, downloaded from storage when this machine lacks them."""
+    files.fetch("source_video", source_id, video)
+    for file_type, name in (("loudness", "loudness.npy"), ("transcript", "transcript.json")):
+        files.fetch(file_type, source_id, source_dir(source_id) / name)
 
 
 def expire(hours: float) -> None:
     """Delete videos and their clips once they are `hours` old, unless a job is still working on them,
     then projects left empty. ClipForge is a workbench, not an archive: people keep the clips they download."""
     db.execute("DELETE FROM activity WHERE at < ?", db.now() - 31 * 86400)  # the chart shows at most 30 days
+    if files.enabled():  # object storage has its own retention (SOURCE_KEEP_HOURS, CLIP_KEEP_DAYS, BACKUP_KEEP_DAYS)
+        files.cleanup()
+        return
     if hours <= 0:
         return
     cutoff = db.now() - hours * 3600
@@ -131,8 +147,14 @@ def analyze_source(source_id: int) -> None:
             raise jobs.Gone()
 
     with _owned(folder):
+        _work_files(source_id, video)
         if not video.exists() and (url := src["meta"].get("url")):
             video = _download(src, url, stage)
+        if not video.exists() and files.enabled():
+            raise media.MediaError(EXPIRED.format(hours=settings.source_keep_hours))
+        if files.enabled():
+            stage("Saving the video to cloud storage", 0.005)
+            files.save("source_video", source_id, video)  # also restarts its expiry: a job is using it again
         stage("Reading video", 0.01)
         info = media.probe(video)
         db.update("sources", source_id, duration=info.duration, width=info.width, height=info.height, fps=info.fps)
@@ -154,6 +176,8 @@ def analyze_source(source_id: int) -> None:
             _save_json, lambda p: json.loads(p.read_text()),
         )
 
+        for file_type, name in (("loudness", "loudness.npy"), ("transcript", "transcript.json")):
+            files.save(file_type, source_id, folder / name)
         stage("Finding highlights", 0.88)
         meta = src["meta"]
         chat_path = folder / "chat.npy"
@@ -206,6 +230,9 @@ def render_clip(clip_id: int) -> None:
     with _owned(folder):
         progress(0.0)
         video, start, end = source_video(src), clip["start"], clip["end"]
+        _work_files(src["id"], video)
+        if not video.exists() and files.enabled():
+            raise media.MediaError(EXPIRED.format(hours=settings.source_keep_hours))
         info = media.probe(video)
         sfolder = source_dir(src["id"])
 
@@ -238,6 +265,11 @@ def render_clip(clip_id: int) -> None:
         ).rowcount:
             raise jobs.Gone()
         db.record("clip")
+    keep = db.now() + settings.clip_keep_days * 86400 if settings.clip_keep_days > 0 else None
+    files.save("clip_video", clip_id, out, keep)
+    files.save("thumbnail", clip_id, folder / "thumb.jpg", keep)
+    if db.one("SELECT id FROM clips WHERE id = ?", clip_id) is None:  # deleted while it uploaded
+        files.delete_all("clip", clip_id)
 
 
 def _mark(table: str) -> Callable[[int, str], None]:

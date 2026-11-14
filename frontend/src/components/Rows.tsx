@@ -39,6 +39,7 @@ export function SourceRow({ source, clipCount, onChange }: { source: Source; cli
   const busy = source.status === "processing" || source.status === "queued";
   const detail =
     source.status === "processing" ? source.stage
+    : source.expired ? `${clipCount} clip${clipCount === 1 ? "" : "s"} · original video deleted after processing`
     : source.status === "ready" ? `${clipCount} clip${clipCount === 1 ? "" : "s"} found`
     : source.status === "failed" ? source.error
     : STATUS[source.status];
@@ -54,8 +55,8 @@ export function SourceRow({ source, clipCount, onChange }: { source: Source; cli
         </div>
       </div>
       <div className="card-actions">
-        {source.status === "failed" && <button className="btn" onClick={act(() => api.reprocess(source.id))}>Try again</button>}
-        {source.status === "ready" && (
+        {source.status === "failed" && !source.expired && <button className="btn" onClick={act(() => api.reprocess(source.id))}>Try again</button>}
+        {source.status === "ready" && !source.expired && (
           <button
             className="btn quiet"
             title="Find clips again with the project's current clip length, count and template"
