@@ -10,7 +10,7 @@ Video work is heavy. Transcription, face detection and encoding use a lot of CPU
 
 1. Run `docker compose up` (or `./run.sh`) and open `http://localhost:8000`.
 2. Drop in a long video or paste a YouTube link, and pick a clip length and template.
-3. The project page shows progress. It runs through upload or download, probe, transcription, highlight detection and rendering.
+3. The project page shows progress. It runs through upload or download, probe, transcription, scene changes, highlight detection and rendering.
 4. Each clip card shows a 9:16 preview, a score from 0 to 100, the reasons it was picked, a title, a description and hashtags.
 5. On a clip you can trim it, edit the text, switch the template, re-render, and download the MP4.
 6. In Live Studio, add a Twitch, YouTube, Kick or direct HLS URL. ClipForge watches it. It records into a rolling buffer when the channel goes live. It cuts a clip when the audio, chat and speech signals spike, and the clip flows through the same pipeline.
@@ -69,7 +69,8 @@ backend/app/
   pipeline.py    analyze_source and render_clip job handlers
   media.py       ffprobe, audio extraction, loudness curve, segment concat
   transcribe.py  faster-whisper with word timestamps; optional cloud Whisper chain, per 10-minute chunk
-  highlights.py  candidate windows, scoring, selection (pure)
+  scenes.py      shot cuts and context changes (outdoors to indoors), so a clip stays in one place
+  highlights.py  candidate windows, scoring, selection (pure); never across a context change
   describe.py    titles, descriptions, hashtags (heuristic + optional AI, which also reranks the clips)
   ai.py          free-tier AI adapters (Gemini, Groq, Cloudflare, OpenRouter): retries, rate limits, fallback
   supabase/functions/ai-gateway  the only holder of provider keys (Supabase secrets); see docs/AI_GATEWAY.md
@@ -141,7 +142,9 @@ The plan builds exactly the feature list in the brief. It adds nothing for billi
 | Probe | File claims an absurd length (forged metadata) | Over 12 hours is rejected, which bounds every array sized by duration | "Videos longer than 12 hours are not supported" |
 | Audio | Video has no audio track | Empty transcript and flat loudness, windows come from the even split | Clips with no captions, no crash |
 | Transcribe | Model download fails offline | Error names the model and the fix | Failed card with the message |
-| Highlights | No speech (music, gameplay) | Loudness-only windows | Clips cut at the loudest moments |
+| Highlights | No speech (music, gameplay) | Loudness-only windows, plus windows that open on a shot cut | Clips cut at the loudest moments, inside one scene |
+| Scenes | The video changes place (outdoors to indoors) | Windows across the change are dropped; low-speech windows end at it. If every window crosses one, the clip is kept with a lower score | Clips that stay in one place |
+| Scenes | Detection fails, or `SCENE_DETECTION=0` | Clips are chosen from speech and sound only, as before | Nothing new |
 | Worker | Process killed mid-render | Running jobs reset to queued at startup, once; a second crash fails the job | Job resumes after restart; a file that crashes twice is skipped |
 | Upload | Restart during an upload | Rows still `uploading` and their partial files are deleted at startup | The upload disappears; upload it again |
 | Render | Disk full, ffmpeg exits non-zero | Last lines of ffmpeg stderr go to `Clip.error` | Failed clip with a retry button |

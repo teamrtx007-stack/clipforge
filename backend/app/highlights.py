@@ -3,6 +3,10 @@
 Each candidate window starts and ends on a sentence boundary. It gets a score from seven signals:
 hook, energy, topic, emotion, pace, clean ending and length fit, plus chat activity for livestreams.
 The best windows that do not overlap become clips.
+
+With scene information (scenes.py), a window never runs across a context change (say, outdoors to indoors):
+those windows are dropped, low-speech windows are cut short at the change, and clip edges never show a
+fraction of a second of a neighbouring shot. If every window would cross one, they stay, with a lower score.
 """
 import math
 import re
@@ -266,18 +270,68 @@ def words_in(words: list[Word], start: float, end: float) -> list[Word]:
 LEAD_IN, TAIL = 0.25, 0.45
 
 
+CROSSING_PENALTY = 0.7  # score multiplier for a window across a context change, when no window avoids one
+EDGE_FLASH = 0.6  # a clip edge this close to a cut moves onto the cut, so no flash of the other shot shows
+
+
+def _changes_inside(w: _Window, changes: list[float]) -> list[float]:
+    return [t for t in changes if w.start + 0.3 < t < w.end - 0.3]
+
+
+def _shot_windows(sents: list[Sentence], duration: float, length: ClipLength, scenes: dict) -> list[_Window]:
+    """Low-speech windows that start where a shot starts, so a clip of mostly picture opens on a clean cut."""
+    starts = [t for t in scenes.get("cuts", []) if t + length.min <= duration]
+    out = [_Window(t, min(duration, t + length.target)) for t in starts]
+    return [w for w in out if not _sentence_inside(w, sents)]
+
+
+def _sentence_inside(w: _Window, sents: list[Sentence]) -> bool:
+    return any(s.start < w.end and s.end > w.start for s in sents)
+
+
+def _end_at_change(w: _Window, changes: list[float], length: ClipLength) -> _Window | None:
+    """A window without sentences, cut short at its first context change; None if that leaves it too short."""
+    inside = _changes_inside(w, changes)
+    if not inside:
+        return w
+    end = inside[0]
+    return _Window(w.start, end) if end - w.start >= length.min else None
+
+
+def _away_from_cuts(start: float, end: float, first_word: float, last_word: float,
+                    cuts: list[float]) -> tuple[float, float]:
+    """Move a clip edge onto a cut that is just inside it, unless that would clip a word."""
+    for c in cuts:
+        if start < c <= min(start + EDGE_FLASH, first_word):
+            start = c
+        if max(end - EDGE_FLASH, last_word) <= c < end:
+            end = c
+    return start, end
+
+
 def find(transcript: dict, loudness_db: np.ndarray, duration: float, length: ClipLength, max_clips: int,
-         must_include: float | None = None, chat: np.ndarray | None = None) -> list[Candidate]:
+         must_include: float | None = None, chat: np.ndarray | None = None,
+         scenes: dict | None = None) -> list[Candidate]:
     z = loudness_z(loudness_db)
     chat_z = robust_z(chat) if chat is not None and np.any(chat) else None
     sents = sentences(words_from(transcript))
+    changes = list(scenes.get("context_changes", [])) if scenes else []
 
     if duration <= length.min:
         windows = [_Window(0.0, duration, tuple(sents), Counter(t for s in sents for t in content_terms(s.text)))]
     else:
-        windows = _sentence_windows(sents, length) + _quiet_windows(sents, duration, length)
+        quiet = _quiet_windows(sents, duration, length)
+        if scenes:
+            quiet += _shot_windows(sents, duration, length, scenes)
+            quiet = [q for w in quiet if (q := _end_at_change(w, changes, length))]
+        windows = _sentence_windows(sents, length) + quiet
     if must_include is not None:
         windows = [w for w in windows if w.start <= must_include <= w.end] or [_around(must_include, duration, length)]
+    # Never across a context change, unless every window crosses one: then the clip is still made, ranked lower.
+    crossing = {id(w) for w in windows if _changes_inside(w, changes)}
+    if crossing and len(crossing) < len(windows):
+        windows = [w for w in windows if id(w) not in crossing]
+        crossing = set()
 
     df = Counter(t for s in sents for t in set(content_terms(s.text)))
     idf = {t: math.log((len(sents) + 1) / (n + 0.5)) for t, n in df.items()}
@@ -292,7 +346,8 @@ def find(transcript: dict, loudness_db: np.ndarray, duration: float, length: Cli
     candidates = []
     for w, f, reasons, peak in scored:
         weight = sum(WEIGHTS[k] for k in f)
-        score = round(100 * sum(WEIGHTS[k] * v for k, v in f.items()) / weight)
+        score = round(100 * sum(WEIGHTS[k] * v for k, v in f.items()) / weight
+                      * (CROSSING_PENALTY if id(w) in crossing else 1.0))
         keywords = tuple(t for t, _ in sorted(w.terms.items(), key=lambda kv: -kv[1] * idf.get(kv[0], 0))[:5])
         if f.get("topic", 0) >= 0.85 and keywords:
             reasons.append((f["topic"] * 0.8, "Focused on " + ", ".join(keywords[:2])))
@@ -300,7 +355,10 @@ def find(transcript: dict, loudness_db: np.ndarray, duration: float, length: Cli
         room = max(0.0, length.max - (w.end - w.start) - 0.01)  # padding (after rounding) keeps the length promise
         tail = min(TAIL, room, duration - w.end)
         lead = min(LEAD_IN, room - tail, w.start)
-        candidates.append(Candidate(round(w.start - lead, 2), round(w.end + tail, 2), score, top_reasons,
+        start, end = w.start - lead, w.end + tail
+        if scenes:
+            start, end = _away_from_cuts(start, end, w.start, w.end, scenes.get("cuts", []))
+        candidates.append(Candidate(round(start, 2), round(end, 2), score, top_reasons,
                                     " ".join(s.text for s in w.sents), keywords, round(peak, 2)))
     return select(candidates, max_clips)
 
