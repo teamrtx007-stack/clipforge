@@ -289,3 +289,36 @@ def test_ffmpeg_failing_halfway_leaves_no_partial_file(tmp_path, monkeypatch):
         with pytest.raises(media.MediaError):
             make()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(captions.drawable() is None, reason="needs fontconfig")
+def test_hindi_captions_render_without_any_system_font(tmp_path, monkeypatch):
+    """The Docker image has no fonts of its own. The bundled Noto fonts must reach libass through
+    fontconfig, or Hindi burns in as empty boxes (it did, before this test)."""
+    import subprocess
+
+    from app import media
+
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=0x335577:s=640x360:r=10:d=1",
+                    "-pix_fmt", "yuv420p", str(video)], check=True)
+    ass = tmp_path / "c.ass"
+    ass.write_text(captions.build_ass([Word(0.0, 1.0, "देखो")], captions.CaptionStyle(animation="static")))
+
+    def frame(conf_text: str) -> bytes:
+        conf = tmp_path / "fonts.conf"
+        conf.write_text(conf_text)
+        monkeypatch.setattr(render, "fontconfig_file", lambda: conf)
+        out = tmp_path / "out.mp4"
+        render.render(video, media.probe(video), 0.0, 1.0, camera.CENTER, np.ones(10), "fit_blur", ass, out, lambda p: None)
+        return subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-ss", "0.5", "-i", str(out), "-frames:v", "1",
+                               "-f", "image2pipe", "-vcodec", "png", "-"], check=True, capture_output=True).stdout
+
+    # As in Docker: the system's font configuration is missing, so only what fontconfig_file adds exists.
+    monkeypatch.setattr(captions, "SYSTEM_FONTS_CONF", str(tmp_path / "no-system-fonts.conf"))
+    captions.fontconfig_file.cache_clear()
+    real = captions.fontconfig_file()
+    captions.fontconfig_file.cache_clear()
+    with_fonts = frame(real.read_text())
+    no_fonts = frame(f'<?xml version="1.0"?><fontconfig><cachedir>{tmp_path / "cache"}</cachedir></fontconfig>')
+    assert with_fonts != no_fonts, "the Hindi word was drawn as boxes: the bundled fonts did not reach libass"
