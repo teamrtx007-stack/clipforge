@@ -204,9 +204,9 @@ def test_check_probes_the_gateway_keys(api, override, capsys):
     api.script = {
         "/gw/v1/chat/completions": [_reply('{"ok": true}')],
         "/gw/v1/health/probe": [(200, {"results": [{"provider": "groq", "key_id": "3e9b3b9bbe05", "ok": True},
-                                                   {"provider": "zai", "key_id": "de6ba94d58f5", "ok": False,
+                                                   {"provider": "ollama", "key_id": "de6ba94d58f5", "ok": False,
                                                     "error": "HTTP 401: invalid key [redacted]"}]}, {})],
     }
     assert ai.check() == 1, "one refused key is a failure"
     out = capsys.readouterr().out
-    assert "ok    groq key 3e9b3b9bbe05" in out and "FAIL  zai key de6ba94d58f5: HTTP 401" in out and "gw-token" not in out
+    assert "ok    groq key 3e9b3b9bbe05" in out and "FAIL  ollama key de6ba94d58f5: HTTP 401" in out and "gw-token" not in out

@@ -2,7 +2,7 @@
 // Keys come only from Supabase secrets. Everything else (logs, database, responses) sees a key id:
 // the first 12 hex characters of the key's SHA-256, which cannot be turned back into the key.
 
-export const PROVIDERS = ["gemini", "groq", "zai", "cloudflare", "openrouter"] as const;
+export const PROVIDERS = ["gemini", "groq", "ollama", "cloudflare", "openrouter"] as const;
 export type Provider = typeof PROVIDERS[number];
 
 export interface Key {
@@ -25,7 +25,7 @@ export interface KeyState {
 export const SECRET_NAMES: Record<Provider, string> = {
   gemini: "GEMINI_API_KEYS",
   groq: "GROQ_API_KEYS",
-  zai: "ZAI_API_KEYS",
+  ollama: "OLLAMA_API_KEYS",
   cloudflare: "CLOUDFLARE_API_TOKENS",
   openrouter: "OPENROUTER_API_KEYS",
 };

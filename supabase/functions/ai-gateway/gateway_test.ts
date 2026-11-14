@@ -6,7 +6,7 @@ import { MemoryStore, ResilientStore, type Store } from "./store.ts";
 const SECRETS: Record<string, string> = {
   GEMINI_API_KEYS: "AQ.gemini-one,AQ.gemini-two",
   GROQ_API_KEYS: "gsk_groq-one\ngsk_groq-two",
-  ZAI_API_KEYS: "zai.secret-one",
+  OLLAMA_API_KEYS: "ollama-key-one",
   CLOUDFLARE_ACCOUNT_ID: "acct123",
   CLOUDFLARE_API_TOKENS: "cf-token-one",
 };
@@ -39,8 +39,8 @@ function fakeNet(scripts: Record<string, Reply[]> = {}) {
       ? "gemini"
       : url.includes("groq")
       ? "groq"
-      : url.includes("z.ai")
-      ? "zai"
+      : url.includes("ollama.com")
+      ? "ollama"
       : url.includes("cloudflare")
       ? "cloudflare"
       : "openrouter";
@@ -140,7 +140,7 @@ Deno.test("validates input and routes", async () => {
     413,
   );
   eq((await handle(req("/v1/providers/nope/chat/completions", CHAT), deps)).status, 404);
-  eq((await handle(req("/v1/providers/zai/audio/transcriptions", CHAT), deps)).status, 404);
+  eq((await handle(req("/v1/providers/ollama/audio/transcriptions", CHAT), deps)).status, 404);
   eq((await handle(req("/v1/chat/completions", undefined, {}, "GET"), deps)).status, 405);
   eq((await handle(req("/v1/whatever", CHAT), deps)).status, 404);
   eq(deps.calls.length, 0);
@@ -154,12 +154,27 @@ Deno.test("gemini goes first, through its native API, and thinking text is dropp
   eq(body.provider, "gemini");
   eq(body.choices[0].message.content, '{"ok":true}');
   const call = deps.calls[0];
-  assert(call.url.includes("/models/gemini-2.5-flash:generateContent"));
+  assert(call.url.includes("/models/gemini-3.8-flash:generateContent"));
   assert(new Headers(call.init.headers).get("x-goog-api-key")?.startsWith("AQ."), "AQ. keys go in x-goog-api-key");
   assert(!new Headers(call.init.headers).has("authorization"));
   const sent = JSON.parse(call.init.body as string);
   eq(sent.systemInstruction.parts[0].text, "Be brief.");
   eq(sent.generationConfig.responseMimeType, "application/json");
+  eq(sent.generationConfig.thinkingConfig, { thinkingLevel: "low" }, "Gemini 3 thinks briefly so the answer fits");
+});
+
+Deno.test("ollama cloud: OpenAI-compatible endpoint, bearer key, no forced JSON format", async () => {
+  const deps = await gateway();
+  const res = await handle(
+    req("/v1/providers/ollama/chat/completions", { ...CHAT, response_format: { type: "json_object" } }),
+    deps,
+  );
+  eq(res.status, 200);
+  eq(deps.calls[0].url, "https://ollama.com/v1/chat/completions");
+  eq(deps.calls[0].auth, "Bearer ollama-key-one");
+  const sent = JSON.parse(deps.calls[0].init.body as string);
+  eq(sent.model, "gemma4:31b");
+  assert(!("response_format" in sent), "cloud models do not support structured outputs");
 });
 
 Deno.test("keys of one provider take turns", async () => {
@@ -194,20 +209,20 @@ Deno.test("a spent quota cools the key, the next key and provider take over, and
 });
 
 Deno.test("a refused key is benched for a day and shows as refused", async () => {
-  const net = fakeNet({ zai: [{ status: 401, body: { error: "invalid key zai.secret-one" } }] });
+  const net = fakeNet({ ollama: [{ status: 401, body: { error: "invalid key ollama-key-one" } }] });
   const deps = await gateway(net);
-  const res = await handle(req("/v1/providers/zai/chat/completions", CHAT), deps);
+  const res = await handle(req("/v1/providers/ollama/chat/completions", CHAT), deps);
   eq(res.status, 502);
   const body = await res.json();
   eq(body.error.code, "all_providers_failed");
-  assert(!JSON.stringify(body).includes("zai.secret-one"), "an echoed key is redacted");
+  assert(!JSON.stringify(body).includes("ollama-key-one"), "an echoed key is redacted");
   assert(JSON.stringify(body).includes("[redacted]"));
   eq(res.headers.get("retry-after"), "86400");
-  const again = await handle(req("/v1/providers/zai/chat/completions", CHAT), deps);
+  const again = await handle(req("/v1/providers/ollama/chat/completions", CHAT), deps);
   eq(again.status, 503, "no usable key left");
   eq((await again.json()).error.code, "all_keys_cooling");
   const health = await (await handle(req("/v1/health", undefined, {}, "GET"), deps)).json();
-  eq(health.providers.zai.keys[0].state, "refused");
+  eq(health.providers.ollama.keys[0].state, "refused");
 });
 
 Deno.test("a bad request skips to the next provider without blaming the key", async () => {
