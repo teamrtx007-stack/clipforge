@@ -58,7 +58,7 @@ export const DEFAULT_MODELS = {
   text: {
     gemini: "gemini-3.8-flash", // gemini-2.5-flash is closed to new accounts
     groq: "openai/gpt-oss-120b",
-    zai: "glm-4.5-flash",
+    ollama: "gemma4:31b", // Ollama Cloud; list current names with GET https://ollama.com/api/tags
     cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     openrouter: "openrouter/free",
   } as Record<Provider, string>,
@@ -106,8 +106,7 @@ async function call(fetch: Fetch, url: string, init: RequestInit): Promise<any> 
 
 const OPENAI_CHAT: Partial<Record<Provider, (k: Key, env: Env) => string>> = {
   groq: () => "https://api.groq.com/openai/v1/chat/completions",
-  // Zhipu runs two sites with separate keys: api.z.ai (international) and open.bigmodel.cn (China). ZAI_BASE_URL picks one.
-  zai: (_, env) => `${(env("ZAI_BASE_URL") || "https://api.z.ai/api/paas/v4").replace(/\/+$/, "")}/chat/completions`,
+  ollama: () => "https://ollama.com/v1/chat/completions",
   openrouter: () => "https://openrouter.ai/api/v1/chat/completions",
   cloudflare: (k) => `https://api.cloudflare.com/client/v4/accounts/${k.account}/ai/v1/chat/completions`,
 };
@@ -177,9 +176,9 @@ export async function chat(
     max_tokens: input.max_tokens,
     temperature: input.temperature,
   };
-  if (input.json && key.provider !== "cloudflare") body.response_format = { type: "json_object" };
+  // Cloudflare and Ollama Cloud models do not take a forced JSON format; the prompt asks for JSON instead.
+  if (input.json && !["cloudflare", "ollama"].includes(key.provider)) body.response_format = { type: "json_object" };
   if (model.startsWith("openai/gpt-oss")) body.reasoning_effort = "low"; // a reasoning model; keep it short
-  if (key.provider === "zai") body.thinking = { type: "disabled" };
   const data = await call(fetch, OPENAI_CHAT[key.provider]!(key, env), {
     method: "POST",
     signal,

@@ -7,7 +7,7 @@ Every AI provider key lives in one place: Supabase Edge Function secrets. The `a
  ───────────────                 ─────────────────────────                ────────────────────────────────────────────
  no keys, no tokens  ──/api/──▶  GATEWAY_URL + GATEWAY_TOKEN  ──HTTPS──▶  Edge Function ai-gateway
  no AI calls                     (no provider keys)                       │  secrets: GEMINI_API_KEYS, GROQ_API_KEYS,
-                                 falls back to local Whisper              │  ZAI_API_KEYS, CLOUDFLARE_*, OPENROUTER_API_KEYS
+                                 falls back to local Whisper              │  OLLAMA_API_KEYS, CLOUDFLARE_*, OPENROUTER_API_KEYS
                                  and local titles if the                  │  picks provider → key → calls it
                                  gateway is down                          ▼
                                                                           Postgres (RLS: service role only)
@@ -24,7 +24,7 @@ All routes need `Authorization: Bearer <GATEWAY_TOKEN>`. Base URL: `https://<pro
 | Method | Path | Does |
 |---|---|---|
 | POST | `/v1/chat/completions` | Text in OpenAI's format. Routed over every provider with keys, in `AI_TEXT_ORDER` |
-| POST | `/v1/providers/{gemini,groq,zai,cloudflare,openrouter}/chat/completions` | The same, one provider only. `model` is honoured here |
+| POST | `/v1/providers/{gemini,groq,ollama,cloudflare,openrouter}/chat/completions` | The same, one provider only. `model` is honoured here |
 | POST | `/v1/audio/transcriptions` | Speech to text: multipart `file` (max 25 MB) and optional `language`. Groq, then Cloudflare |
 | POST | `/v1/providers/{groq,cloudflare}/audio/transcriptions` | The same, one provider only |
 | GET | `/v1/health` | Every key's state (ready, cooling, refused), cooldown end, 24-hour calls, tokens and audio seconds. Key ids only |
@@ -38,7 +38,7 @@ Answers carry `x-request-id`, `x-gateway-provider` and `x-gateway-key-id`. Error
 
 | Task | Order | Why |
 |---|---|---|
-| Titles, descriptions, hashtags, clip scoring | Gemini → Groq → Z.ai → Cloudflare → OpenRouter | Gemini writes the best Hindi and English; the rest are fallbacks |
+| Titles, descriptions, hashtags, clip scoring | Gemini → Groq → Ollama Cloud → Cloudflare → OpenRouter | Gemini writes the best Hindi and English; the rest are fallbacks |
 | Speech to text | Groq → Cloudflare | Groq Whisper is fast and allows about 8 h of audio a day per key; Cloudflare's daily Neurons cover about 3.5 h |
 
 Change the order with the `AI_TEXT_ORDER` and `AI_SPEECH_ORDER` secrets, for example `groq,gemini`.
@@ -91,10 +91,9 @@ You need a free Supabase account, a free project, and Node.js for the Supabase C
    GATEWAY_TOKEN=<the token from step 3>
    GEMINI_API_KEYS=<gemini key 1>,<gemini key 2>
    GROQ_API_KEYS=<groq key 1>,<groq key 2>
-   ZAI_API_KEYS=<z.ai key>
+   OLLAMA_API_KEYS=<ollama.com API key>
    ```
    Optional: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKENS`, `OPENROUTER_API_KEYS`, model overrides such as `GROQ_MODEL`.
-   If your Z.ai key comes from open.bigmodel.cn (Zhipu's China site) rather than z.ai, also set `ZAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4`.
 5. Upload the secrets, then delete the file:
    ```bash
    npx supabase@latest secrets set --env-file supabase/.env.secrets
@@ -136,7 +135,7 @@ To rotate the gateway token, set a new `GATEWAY_TOKEN` secret and put the same v
 | Supabase | 500,000 Edge Function calls a month, 500 MB database, 150 s per call. Free projects pause after a week without activity; ClipForge then falls back to local models until you restore the project in the dashboard |
 | Gemini | Set per project in AI Studio; changed several times since 2025 |
 | Groq Whisper | About 8 h of audio a day per key, 25 MB per file |
-| Z.ai `glm-4.5-flash` | Free, rate limited |
+| Ollama Cloud `gemma4:31b` | The free plan includes limited cloud usage; check the balance at ollama.com/settings |
 | Cloudflare Workers AI | 10,000 Neurons a day per account |
 | OpenRouter `:free` | 50 requests a day |
 

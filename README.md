@@ -127,7 +127,7 @@ docker compose exec clipforge python -m app.ai
 | Task | Default | Free cloud options, in the order tried |
 |---|---|---|
 | Speech to text | Local faster-whisper | Groq `whisper-large-v3-turbo`, Cloudflare `@cf/openai/whisper-large-v3-turbo` |
-| Titles, descriptions, hashtags | Local heuristic | Gemini `gemini-3.8-flash` (native API, so new `AQ.` keys work), Z.ai `glm-4.5-flash` (gateway only), Groq `openai/gpt-oss-120b`, Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, OpenRouter `openrouter/free` |
+| Titles, descriptions, hashtags | Local heuristic | Gemini `gemini-3.8-flash` (native API, so new `AQ.` keys work), Ollama Cloud `gemma4:31b` (gateway only), Groq `openai/gpt-oss-120b`, Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, OpenRouter `openrouter/free` |
 | Clip scoring | Local signals | The same text provider rates each candidate; its score is 40% of the final score and picks which clips make the cut |
 | Live moment detection | Local (audio, Whisper `tiny`, chat) | None: a cloud call every few seconds per stream would spend a free quota in hours |
 
