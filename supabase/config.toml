@@ -1,0 +1,6 @@
+# Supabase CLI settings for ClipForge. Run `supabase link --project-ref <your ref>` once; see docs/AI_GATEWAY.md.
+project_id = "clipforge"
+
+[functions.ai-gateway]
+# The gateway checks its own bearer token (GATEWAY_TOKEN). Supabase's anon JWT is public, so it proves nothing here.
+verify_jwt = false

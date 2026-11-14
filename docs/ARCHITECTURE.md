@@ -72,6 +72,7 @@ backend/app/
   highlights.py  candidate windows, scoring, selection (pure)
   describe.py    titles, descriptions, hashtags (heuristic + optional AI, which also reranks the clips)
   ai.py          free-tier AI adapters (Gemini, Groq, Cloudflare, OpenRouter): retries, rate limits, fallback
+  supabase/functions/ai-gateway  the only holder of provider keys (Supabase secrets); see docs/AI_GATEWAY.md
   camera.py      YuNet face detection and the smoothed crop and zoom path
   captions.py    animated ASS subtitles (pure)
   templates.py   template registry

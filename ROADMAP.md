@@ -23,9 +23,11 @@ ClipForge is free. It has no plans, no payments and no credits. Every feature be
 | 15 | Captions in Hindi, the other main Indian scripts and Urdu; characters no font can draw are left out, never boxes | done |
 | 16 | White dashboard: sidebar with creators, link box, stat cards, 14-day activity chart, creators table | done |
 | 17 | Free AI providers (Gemini, Groq, Cloudflare Workers AI, OpenRouter) with fallback, cloud speech to text, AI clip reranking | done (no real API call tested yet: no keys in the build environment) |
+| 18 | Supabase AI gateway: keys only in Supabase secrets, key pools with rotation and cooldowns, routes per provider, usage and health tables with RLS | done (not deployed: needs your Supabase project) |
 
 ## Next
 
+- Supabase for the rest of the backend: Auth (replacing the shared password), Postgres for projects and clips, Storage for finished clips. Needs a decision (see docs/AI_GATEWAY.md for the gateway part, which is done).
 - Split-screen layout (face cam on top, gameplay below).
 - Chat analysis for YouTube and Kick.
 - Caption editor that fixes single words before rendering.
