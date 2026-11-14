@@ -73,11 +73,18 @@ def _clean(text: str) -> str:
 
 # Text
 
+def _thinking(model: str) -> dict:
+    """Thinking tokens count against maxOutputTokens, so keep thinking short and the answer fits."""
+    if model.startswith("gemini-2.5"):
+        return {"thinkingConfig": {"thinkingBudget": 512}}
+    return {"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}
+
+
 def _gemini(p: Provider, prompt: str, max_tokens: int) -> str:
     """Gemini's native API: new "AQ." keys are refused by its OpenAI-compatible endpoint."""
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": max_tokens,
-                                 **({"thinkingConfig": {"thinkingBudget": 512}} if p.model.startswith("gemini-2.5") else {})}}
+                                 **_thinking(p.model)}}
     answer = _post(f"{p.base_url}/models/{p.model}:generateContent", json.dumps(body).encode(),
                    {"Content-Type": "application/json", "x-goog-api-key": p.key or ""}, p.name)
     parts = ((answer.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []

@@ -154,12 +154,25 @@ Deno.test("gemini goes first, through its native API, and thinking text is dropp
   eq(body.provider, "gemini");
   eq(body.choices[0].message.content, '{"ok":true}');
   const call = deps.calls[0];
-  assert(call.url.includes("/models/gemini-2.5-flash:generateContent"));
+  assert(call.url.includes("/models/gemini-3.8-flash:generateContent"));
   assert(new Headers(call.init.headers).get("x-goog-api-key")?.startsWith("AQ."), "AQ. keys go in x-goog-api-key");
   assert(!new Headers(call.init.headers).has("authorization"));
   const sent = JSON.parse(call.init.body as string);
   eq(sent.systemInstruction.parts[0].text, "Be brief.");
   eq(sent.generationConfig.responseMimeType, "application/json");
+  eq(sent.generationConfig.thinkingConfig, { thinkingLevel: "low" }, "Gemini 3 thinks briefly so the answer fits");
+});
+
+Deno.test("ZAI_BASE_URL switches Z.ai to the China site", async () => {
+  const deps = await gateway(fakeNet(), new MemoryStore(), {
+    ...SECRETS,
+    ZAI_BASE_URL: "https://open.bigmodel.cn/api/paas/v4/",
+  });
+  eq((await handle(req("/v1/providers/zai/chat/completions", CHAT), deps)).status, 200);
+  eq(deps.calls[0].url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+  const defaults = await gateway();
+  await handle(req("/v1/providers/zai/chat/completions", CHAT), defaults);
+  eq(defaults.calls[0].url, "https://api.z.ai/api/paas/v4/chat/completions");
 });
 
 Deno.test("keys of one provider take turns", async () => {

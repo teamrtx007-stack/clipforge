@@ -56,7 +56,7 @@ export class UpstreamError extends Error {
 // Model IDs checked November 2026. Each can be overridden with a secret, e.g. GROQ_MODEL or GROQ_WHISPER_MODEL.
 export const DEFAULT_MODELS = {
   text: {
-    gemini: "gemini-2.5-flash",
+    gemini: "gemini-3.8-flash", // gemini-2.5-flash is closed to new accounts
     groq: "openai/gpt-oss-120b",
     zai: "glm-4.5-flash",
     cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
@@ -104,9 +104,10 @@ async function call(fetch: Fetch, url: string, init: RequestInit): Promise<any> 
   }
 }
 
-const OPENAI_CHAT: Partial<Record<Provider, (k: Key) => string>> = {
+const OPENAI_CHAT: Partial<Record<Provider, (k: Key, env: Env) => string>> = {
   groq: () => "https://api.groq.com/openai/v1/chat/completions",
-  zai: () => "https://api.z.ai/api/paas/v4/chat/completions",
+  // Zhipu runs two sites with separate keys: api.z.ai (international) and open.bigmodel.cn (China). ZAI_BASE_URL picks one.
+  zai: (_, env) => `${(env("ZAI_BASE_URL") || "https://api.z.ai/api/paas/v4").replace(/\/+$/, "")}/chat/completions`,
   openrouter: () => "https://openrouter.ai/api/v1/chat/completions",
   cloudflare: (k) => `https://api.cloudflare.com/client/v4/accounts/${k.account}/ai/v1/chat/completions`,
 };
@@ -129,7 +130,11 @@ async function geminiChat(
       maxOutputTokens: input.max_tokens,
       ...(input.json ? { responseMimeType: "application/json" } : {}),
       // Thinking tokens count against maxOutputTokens; a small budget keeps the answer from being cut off.
-      ...(model.startsWith("gemini-2.5") ? { thinkingConfig: { thinkingBudget: 512 } } : {}),
+      ...(model.startsWith("gemini-2.5")
+        ? { thinkingConfig: { thinkingBudget: 512 } }
+        : model.startsWith("gemini-3")
+        ? { thinkingConfig: { thinkingLevel: "low" } }
+        : {}),
     },
   };
   const data = await call(
@@ -175,7 +180,7 @@ export async function chat(
   if (input.json && key.provider !== "cloudflare") body.response_format = { type: "json_object" };
   if (model.startsWith("openai/gpt-oss")) body.reasoning_effort = "low"; // a reasoning model; keep it short
   if (key.provider === "zai") body.thinking = { type: "disabled" };
-  const data = await call(fetch, OPENAI_CHAT[key.provider]!(key), {
+  const data = await call(fetch, OPENAI_CHAT[key.provider]!(key, env), {
     method: "POST",
     signal,
     body: JSON.stringify(body),

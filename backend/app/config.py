@@ -23,7 +23,7 @@ class Provider:
 TEXT_PRESETS = {
     "gateway": ("{gateway}/v1", "GATEWAY_TOKEN", "GATEWAY_MODEL", "auto"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta", "GEMINI_API_KEY", "GEMINI_MODEL",
-               "gemini-2.5-flash"),
+               "gemini-3.8-flash"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
     "cloudflare": ("https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1", "CLOUDFLARE_API_TOKEN",
                    "CLOUDFLARE_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),

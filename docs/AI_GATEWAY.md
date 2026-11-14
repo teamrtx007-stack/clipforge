@@ -94,6 +94,7 @@ You need a free Supabase account, a free project, and Node.js for the Supabase C
    ZAI_API_KEYS=<z.ai key>
    ```
    Optional: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKENS`, `OPENROUTER_API_KEYS`, model overrides such as `GROQ_MODEL`.
+   If your Z.ai key comes from open.bigmodel.cn (Zhipu's China site) rather than z.ai, also set `ZAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4`.
 5. Upload the secrets, then delete the file:
    ```bash
    npx supabase@latest secrets set --env-file supabase/.env.secrets
