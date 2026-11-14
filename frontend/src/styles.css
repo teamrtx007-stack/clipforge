@@ -237,6 +237,10 @@ textarea { resize: vertical; min-height: 84px; }
 .strip .switch { color: #c4cad2; }
 .strip input[type="number"] { width: 64px; padding: 4px 8px; }
 .strip.compact { padding-block: 26px; }
+.strip .link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; }
+.strip .link input { flex: 1 1 260px; min-width: 0; }
+.strip .link .error-text { flex-basis: 100%; margin: 0; }
+.keep-note { margin: -6px 0 14px; font-size: 13px; color: var(--graphite); }
 .strip.compact .display { font-size: 28px; }
 
 @media (max-width: 720px) {

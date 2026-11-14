@@ -122,6 +122,7 @@ export interface SystemInfo {
   llm: { enabled: boolean; model: string | null; host: string | null };
   live_enabled: boolean;
   workers: number;
+  keep_hours: number;
   disk_free_bytes: number;
 }
 
@@ -155,6 +156,8 @@ export const api = {
     request<Project>("PATCH", `/api/projects/${id}`, changes),
   deleteProject: (id: number) => request<void>("DELETE", `/api/projects/${id}`),
 
+  addLink: (projectId: number, url: string, settings?: Partial<ProjectSettings>) =>
+    request<Source>("POST", `/api/projects/${projectId}/link`, { url, ...settings }),
   reprocess: (id: number) => request<Source>("POST", `/api/sources/${id}/reprocess`),
   deleteSource: (id: number) => request<void>("DELETE", `/api/sources/${id}`),
 

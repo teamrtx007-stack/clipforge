@@ -1,17 +1,37 @@
 import { useRef, useState, type ReactNode } from "react";
+import { message } from "../api";
 
 interface Props {
   title: string;
   hint: string;
   onFiles: (files: File[]) => void;
+  /** Adds a pasted video link. A rejected promise's message is shown under the box. */
+  onLink: (url: string) => Promise<unknown>;
   children?: ReactNode;
   compact?: boolean;
 }
 
-/** A film strip that takes dropped videos. The button opens the file picker for keyboard and touch users. */
-export function UploadStrip({ title, hint, onFiles, children, compact = false }: Props) {
+/** A film strip that takes dropped videos or a pasted link. The button opens the file picker for keyboard and touch users. */
+export function UploadStrip({ title, hint, onFiles, onLink, children, compact = false }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
+  const [link, setLink] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  async function addLink(e: React.FormEvent) {
+    e.preventDefault();
+    setAdding(true);
+    setLinkError(null);
+    try {
+      await onLink(link.trim());
+      setLink("");
+    } catch (err) {
+      setLinkError(message(err));
+    } finally {
+      setAdding(false);
+    }
+  }
   const take = (list: FileList | null) => {
     const files = Array.from(list ?? []).filter((f) => f.type.startsWith("video/") || /\.(mkv|ts|mts|flv)$/i.test(f.name));
     if (files.length) onFiles(files);
@@ -51,6 +71,12 @@ export function UploadStrip({ title, hint, onFiles, children, compact = false }:
           }}
         />
       </div>
+      <form className="link" onSubmit={addLink}>
+        <input type="url" required value={link} onChange={(e) => setLink(e.target.value)}
+          placeholder="Or paste a YouTube link: https://youtube.com/watch?v=…" aria-label="Video link" />
+        <button className="btn primary" type="submit" disabled={adding}>{adding ? "Adding…" : "Get clips"}</button>
+        {linkError && <p className="error-text">{linkError}</p>}
+      </form>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, message, type ProjectSettings } from "../api";
 import { ClipCard } from "../components/ClipCard";
+import { KeepNote } from "../components/KeepNote";
 import { SourceRow, UploadRow } from "../components/Rows";
 import { LengthSelect, TemplateSelect } from "../components/Selects";
 import { UploadStrip } from "../components/UploadStrip";
@@ -61,8 +62,9 @@ export default function ProjectPage() {
       </div>
 
       {!project.channel && (
-        <UploadStrip compact title="Add videos" hint="New uploads use the clip length and template below."
-          onFiles={(files) => files.forEach((f) => uploads.start(id, f).then(reload, () => undefined))}>
+        <UploadStrip compact title="Add videos" hint="New videos use the clip length and template below."
+          onFiles={(files) => files.forEach((f) => uploads.start(id, f).then(reload, () => undefined))}
+          onLink={(url) => api.addLink(id, url).then(reload)}>
           <LengthSelect value={project.settings.length} onChange={setting("length")} />
           <TemplateSelect value={project.settings.template} onChange={setting("template")} />
           <label className="switch">
@@ -96,6 +98,7 @@ export default function ProjectPage() {
           <h2 className="display">Clips</h2>
           {project.clips.length > 0 && <span className="mono muted">Best first · circled = strong pick</span>}
         </div>
+        <KeepNote />
         {project.clips.length ? (
           <div className="sheet">
             {project.clips.map((c) => <ClipCard key={c.id} clip={c} />)}
@@ -106,7 +109,7 @@ export default function ProjectPage() {
               ? "Clips from this channel appear here while it streams."
               : project.sources.length
                 ? "Clips appear here when a video finishes processing."
-                : "Add a video to find clips."}
+                : "Add a video or paste a link to find clips."}
           </div>
         )}
       </section>

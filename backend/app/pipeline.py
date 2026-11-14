@@ -11,8 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import camera, captions, db, describe, highlights, jobs, media, transcribe
-from .config import clip_dir, source_dir
+from . import camera, captions, db, describe, fetch, highlights, jobs, media, transcribe
+from .config import clip_dir, settings, source_dir
 from .media import HOP
 from .render import render
 from .templates import DEFAULT_TEMPLATE, TEMPLATES
@@ -66,6 +66,33 @@ def discard_interrupted_uploads() -> None:
         shutil.rmtree(source_dir(row["id"]), ignore_errors=True)
 
 
+def remove_files(source_ids: list[int], clip_ids: list[int]) -> None:
+    for sid in source_ids:
+        shutil.rmtree(source_dir(sid), ignore_errors=True)
+    for cid in clip_ids:
+        shutil.rmtree(clip_dir(cid), ignore_errors=True)
+
+
+def expire(hours: float) -> None:
+    """Delete videos and their clips once they are `hours` old, unless a job is still working on them,
+    then projects left empty. ClipForge is a workbench, not an archive: people keep the clips they download."""
+    if hours <= 0:
+        return
+    cutoff = db.now() - hours * 3600
+    with db.transaction():
+        old = [r["id"] for r in db.rows(
+            """SELECT id FROM sources s WHERE created_at < ? AND status NOT IN ('uploading', 'queued', 'processing')
+                 AND NOT EXISTS (SELECT 1 FROM clips WHERE source_id = s.id AND status IN ('queued', 'rendering'))""",
+            cutoff)]
+        clips = [r["id"] for sid in old for r in db.rows("SELECT id FROM clips WHERE source_id = ?", sid)]
+        for sid in old:
+            db.execute("DELETE FROM sources WHERE id = ?", sid)  # cascades to its clips
+        db.execute("""DELETE FROM projects WHERE created_at < ?
+                        AND NOT EXISTS (SELECT 1 FROM sources WHERE project_id = projects.id)
+                        AND NOT EXISTS (SELECT 1 FROM channels WHERE project_id = projects.id)""", cutoff)
+    remove_files(old, clips)
+
+
 @contextmanager
 def _owned(folder: Path) -> Iterator[None]:
     """If the job's row is deleted mid-job, delete whatever the job wrote after the API cleaned up."""
@@ -74,6 +101,22 @@ def _owned(folder: Path) -> Iterator[None]:
     except jobs.Gone:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+def _download(src: dict, url: str, stage: Callable[[str, float], None]) -> Path:
+    """Fetch a pasted link. The video, and a project still named after the link, take the video's title."""
+    folder = source_dir(src["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    stage("Downloading video", 0.0)
+
+    def titled(title: str) -> None:
+        if title:
+            db.update("sources", src["id"], name=title[:200])
+            db.execute("UPDATE projects SET name = ? WHERE id = ? AND name = ?", title[:120], src["project_id"], url[:120])
+
+    video = fetch.download(url, folder, settings.max_upload_bytes, titled, lambda p: stage("Downloading video", p))
+    db.update("sources", src["id"], ext=video.suffix)
+    return video
 
 
 def analyze_source(source_id: int) -> None:
@@ -88,6 +131,8 @@ def analyze_source(source_id: int) -> None:
             raise jobs.Gone()
 
     with _owned(folder):
+        if not video.exists() and (url := src["meta"].get("url")):
+            video = _download(src, url, stage)
         stage("Reading video", 0.01)
         info = media.probe(video)
         db.update("sources", source_id, duration=info.duration, width=info.width, height=info.height, fps=info.fps)

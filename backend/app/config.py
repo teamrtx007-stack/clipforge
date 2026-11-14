@@ -19,6 +19,7 @@ class Settings:
     max_upload_bytes: int
     workers: int
     live_enabled: bool
+    keep_hours: float
 
 
 def _load() -> Settings:
@@ -35,6 +36,7 @@ def _load() -> Settings:
         max_upload_bytes=int(env("MAX_UPLOAD_MB", "8192")) * 1024 * 1024,
         workers=max(1, int(env("WORKERS", "1"))),
         live_enabled=env("LIVE_ENABLED", "1") != "0",
+        keep_hours=float(env("KEEP_HOURS", "24")),
     )
 
 

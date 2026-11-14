@@ -14,6 +14,8 @@ services:
       # Safe only because the port above is bound to 127.0.0.1.
       ALLOW_NO_PASSWORD: ${ALLOW_NO_PASSWORD:-1}
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      # Hours before videos and their clips are deleted. 0 keeps everything.
+      KEEP_HOURS: ${KEEP_HOURS:-24}
       # Optional AI titles from a local model, still free:
       #   1. docker compose --profile llm up -d
       #   2. docker compose exec ollama ollama pull llama3.2:3b
