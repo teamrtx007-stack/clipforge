@@ -4,18 +4,8 @@ import { api, message, type Channel, type Sensitivity } from "../api";
 import { ClipCard } from "../components/ClipCard";
 import { Meter } from "../components/Meter";
 import { TemplateSelect } from "../components/Selects";
-import { ago, timecode } from "../format";
+import { ago, CHANNEL_STATUS, timecode } from "../format";
 import { usePoll } from "../hooks";
-
-const STATUS_LABEL: Record<Channel["runtime"]["status"], string> = {
-  starting: "Checking",
-  offline: "Offline",
-  live: "Live, not recording",
-  recording: "On air · recording",
-  error: "Error",
-  disabled: "Paused",
-  off: "Monitoring off",
-};
 
 const SENSITIVITY: { value: Sensitivity; label: string }[] = [
   { value: "low", label: "Big moments only" },
@@ -37,7 +27,7 @@ function ChannelCard({ channel, onChange }: { channel: Channel; onChange: () => 
   return (
     <article className={rt.status === "recording" ? "channel on-air" : "channel"}>
       <header>
-        <span className={`tally ${rt.status}`}>{STATUS_LABEL[rt.status]}</span>
+        <span className={`tally ${rt.status}`}>{CHANNEL_STATUS[rt.status]}</span>
         <label className="switch">
           <input type="checkbox" checked={channel.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
           Watch
@@ -109,7 +99,7 @@ export default function LiveStudio() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Live AI clipping</div>
-          <h1 className="display">Live studio</h1>
+          <h1 className="display">Creators</h1>
         </div>
       </div>
 
@@ -129,7 +119,7 @@ export default function LiveStudio() {
         <label className="field">Template
           <TemplateSelect value={template} onChange={setTemplate} />
         </label>
-        <button className="btn primary" type="submit">Start watching</button>
+        <button className="btn primary" type="submit">Add creator</button>
       </form>
       {error && <p className="error-text">{error}</p>}
       <p className="muted" style={{ fontSize: 13 }}>
@@ -143,7 +133,7 @@ export default function LiveStudio() {
             {channels.data.map((c) => <ChannelCard key={c.id} channel={c} onChange={channels.reload} />)}
           </div>
         ) : (
-          channels.data && <div className="empty">Add a channel above. You can watch several at once.</div>
+          channels.data && <div className="empty">Add a creator above. You can watch several at once.</div>
         )}
       </section>
 

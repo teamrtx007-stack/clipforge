@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ASSETS = Path(__file__).parent / "assets"
+FONTS = ASSETS / "fonts"  # caption fonts; libass falls back across all of them, glyph by glyph
 
 
 @dataclass(frozen=True)

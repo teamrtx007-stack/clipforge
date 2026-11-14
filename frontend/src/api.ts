@@ -124,6 +124,13 @@ export interface SystemInfo {
   workers: number;
   keep_hours: number;
   disk_free_bytes: number;
+  disk_total_bytes: number;
+}
+
+export interface Stats {
+  days: { day: string; videos: number; clips: number; moments: number }[];
+  clips_ready: number;
+  jobs_active: number;
 }
 
 async function errorText(res: Response): Promise<string> {
@@ -171,6 +178,7 @@ export const api = {
   templates: () => request<Template[]>("GET", "/api/templates"),
   jobs: () => request<Job[]>("GET", "/api/jobs"),
   system: () => request<SystemInfo>("GET", "/api/system"),
+  stats: () => request<Stats>("GET", `/api/stats?days=14&tz_offset=${new Date().getTimezoneOffset()}`),
 
   channels: () => request<Channel[]>("GET", "/api/channels"),
   addChannel: (url: string, sensitivity: Sensitivity, template: string) =>

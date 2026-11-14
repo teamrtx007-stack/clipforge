@@ -1,6 +1,7 @@
 """REST API. Input is validated here; everything behind it trusts its arguments."""
 import re
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Annotated, Literal
@@ -349,7 +350,25 @@ def system() -> dict:
         "workers": settings.workers,
         "keep_hours": settings.keep_hours,
         "disk_free_bytes": disk.free,
+        "disk_total_bytes": disk.total,
         "templates": len(TEMPLATES),
+    }
+
+
+@router.get("/stats")
+def stats(tz_offset: int = 0, days: int = 14) -> dict:
+    """Work done per day in the viewer's time zone, for the dashboard. `tz_offset` is JavaScript's
+    Date.getTimezoneOffset(): minutes behind UTC, so India is -330."""
+    days, shift = min(max(days, 1), 30), -min(max(tz_offset, -900), 900) * 60
+    today = datetime.fromtimestamp(db.now() + shift, timezone.utc).date()
+    counts = {(r["day"], r["kind"]): r["n"] for r in db.rows(
+        """SELECT date(at + ?, 'unixepoch') AS day, kind, COUNT(*) AS n FROM activity
+           WHERE at >= ? GROUP BY day, kind""", shift, db.now() - (days + 1) * 86400)}
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    return {
+        "days": [{"day": d, **{k + "s": counts.get((d, k), 0) for k in ("video", "clip", "moment")}} for d in dates],
+        "clips_ready": db.one("SELECT COUNT(*) AS n FROM clips WHERE status = 'ready'")["n"],
+        "jobs_active": db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued', 'running')")["n"],
     }
 
 

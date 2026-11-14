@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
 );
+-- One row per finished piece of work, for the dashboard chart. It outlives the videos and clips it counts.
+CREATE TABLE IF NOT EXISTS activity (
+  kind TEXT NOT NULL CHECK (kind IN ('video', 'clip', 'moment')),
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS activity_at ON activity (at);
 CREATE INDEX IF NOT EXISTS jobs_claim ON jobs (status, priority DESC, id);
 CREATE INDEX IF NOT EXISTS sources_project ON sources (project_id);
 CREATE INDEX IF NOT EXISTS clips_source ON clips (source_id);
@@ -152,3 +158,8 @@ def transaction() -> Iterator[None]:
 
 def now() -> float:
     return time.time()
+
+
+def record(kind: str) -> None:
+    """Count a video analyzed, a clip rendered or a live moment cut."""
+    execute("INSERT INTO activity (kind, at) VALUES (?, ?)", kind, now())

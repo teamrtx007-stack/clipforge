@@ -20,6 +20,8 @@ ClipForge is free. It has no plans, no payments and no credits. Every feature be
 | 12 | Testing and deployment: pytest, end-to-end runs, Docker, free hosting guide | done |
 | 13 | Paste a YouTube link: yt-dlp downloads it, then the same pipeline runs | done |
 | 14 | Automatic cleanup: videos and clips deleted 24 hours after they are added | done |
+| 15 | Captions in Hindi, the other main Indian scripts and Urdu; characters no font can draw are left out, never boxes | done |
+| 16 | White dashboard: sidebar with creators, link box, stat cards, 14-day activity chart, creators table | done |
 
 ## Next
 

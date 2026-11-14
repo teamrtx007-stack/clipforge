@@ -30,6 +30,8 @@ Job      id, kind(analyze_source|render_clip), target_id, status(queued|running|
          priority, attempts, error
 Channel  id, platform, url, name, enabled, auto_record, auto_render, chat, speech,
          sensitivity, template, buffer_minutes
+Activity kind(video|clip|moment), at   one row per finished piece of work, for the dashboard chart;
+         it outlives the videos it counts and is kept 31 days
 ```
 
 Files live under `data/`. Paths are derived from ids and never stored. `data/sources/<id>/` holds the original video, `audio.wav`, `transcript.json` and `analysis.json`. `data/clips/<id>/` holds `clip.mp4`, `thumb.jpg` and `captions.ass`. A cleanup thread deletes sources and their clips `KEEP_HOURS` (24) after they were added, never while a job uses them, then projects left empty. The user keeps what they download.

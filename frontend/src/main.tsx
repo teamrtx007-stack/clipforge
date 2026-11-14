@@ -2,47 +2,67 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Link, NavLink, Outlet, RouterProvider } from "react-router-dom";
 import { api } from "./api";
+import { Icon } from "./components/Icon";
+import { bytes } from "./format";
 import { usePoll } from "./hooks";
 import ClipEditor from "./pages/ClipEditor";
-import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
 import LiveStudio from "./pages/LiveStudio";
 import ProjectPage from "./pages/Project";
 import Queue from "./pages/Queue";
+import Videos from "./pages/Videos";
 import "./styles.css";
 import { UploadsProvider } from "./uploads";
 
-function Shell() {
+function Sidebar() {
   const { data: jobs } = usePoll(api.jobs, 4000);
+  const { data: projects } = usePoll(api.projects, 8000);
+  const { data: channels } = usePoll(api.channels, 5000);
   const { data: system } = usePoll(api.system, 60000);
   const active = jobs?.filter((j) => j.status === "queued" || j.status === "running").length ?? 0;
+  const videos = projects?.filter((p) => !p.channel_id).length ?? 0;
   return (
-    <>
-      <header className="slate">
-        <Link to="/" className="wordmark" aria-label="ClipForge home">
-          <svg width="16" height="26" viewBox="0 0 16 26" aria-hidden="true">
-            <rect x="0.75" y="0.75" width="14.5" height="24.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-            <circle cx="8" cy="13" r="4.2" fill="none" stroke="#e2372b" strokeWidth="2" />
-          </svg>
-          <span>ClipForge</span>
-        </Link>
-        <nav>
-          <NavLink to="/" end>Projects</NavLink>
-          <NavLink to="/live">Live studio</NavLink>
-          <NavLink to="/queue">
-            Queue{active > 0 && <span className="count">{active}</span>}
+    <aside className="sidebar">
+      <Link to="/" className="wordmark" aria-label="ClipForge home">
+        <span className="logo" aria-hidden="true"><Icon name="scissors" size={17} /></span>
+        <span>ClipForge</span>
+      </Link>
+      <nav className="side-nav" aria-label="Main">
+        <NavLink to="/" end><Icon name="home" />Home</NavLink>
+        <NavLink to="/videos"><Icon name="film" />All videos{videos > 0 && <span className="count">{videos}</span>}</NavLink>
+        <NavLink to="/queue"><Icon name="list" />Queue{active > 0 && <span className="count hot">{active}</span>}</NavLink>
+      </nav>
+      <div className="side-label">Creators</div>
+      <nav className="side-nav creators" aria-label="Creators">
+        {channels?.map((c) => (
+          <NavLink key={c.id} to={`/projects/${c.project_id}`}>
+            <span className={`avatar ${c.runtime.status}`}>{c.name[0]?.toUpperCase()}</span>
+            <span className="label">{c.name}</span>
           </NavLink>
-        </nav>
-        {system && (
-          <span className="engine" title="Transcription and editing run on this computer. No paid APIs.">
-            Runs locally · Whisper {system.whisper_model}
-            {system.llm.enabled ? ` · ${system.llm.model}` : ""}
-          </span>
-        )}
-      </header>
+        ))}
+        <NavLink to="/live" end><Icon name="plusCircle" />New creator</NavLink>
+      </nav>
+      {system && (
+        <div className="side-card" title="Transcription and editing run on this computer. No paid APIs.">
+          <span>Free · runs on this computer</span>
+          <b>Whisper {system.whisper_model}</b>
+          <span>{bytes(system.disk_free_bytes)} free on disk</span>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function Shell() {
+  return (
+    <div className="app">
+      <Sidebar />
       <main>
-        <Outlet />
+        <div className="content">
+          <Outlet />
+        </div>
       </main>
-    </>
+    </div>
   );
 }
 
@@ -50,12 +70,13 @@ const router = createBrowserRouter([
   {
     element: <Shell />,
     children: [
-      { path: "/", element: <Dashboard /> },
+      { path: "/", element: <Home /> },
+      { path: "/videos", element: <Videos /> },
       { path: "/projects/:id", element: <ProjectPage /> },
       { path: "/clips/:id", element: <ClipEditor /> },
       { path: "/live", element: <LiveStudio /> },
       { path: "/queue", element: <Queue /> },
-      { path: "*", element: <p>Page not found. <Link to="/">Go to projects</Link></p> },
+      { path: "*", element: <p>Page not found. <Link to="/">Go home</Link></p> },
     ],
   },
 ]);

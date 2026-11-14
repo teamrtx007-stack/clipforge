@@ -177,3 +177,15 @@ def test_channel_flags_are_booleans(client):
     assert ch["auto_record"] is True and ch["enabled"] is True
     assert client.patch(f"/api/channels/{ch['id']}", json={"chat": False}).json()["chat"] is False
     client.delete(f"/api/channels/{ch['id']}")
+
+
+def test_stats_count_work_per_local_day(client):
+    db.execute("DELETE FROM activity")
+    for kind in ("clip", "clip", "video"):
+        db.record(kind)
+    db.execute("INSERT INTO activity (kind, at) VALUES ('moment', ?)", db.now() - 86400)
+    s = client.get("/api/stats", params={"tz_offset": -330, "days": 14}).json()
+    assert len(s["days"]) == 14
+    assert s["days"][-1] | {"day": None} == {"day": None, "videos": 1, "clips": 2, "moments": 0}
+    assert s["days"][-2]["moments"] == 1
+    assert {"clips_ready", "jobs_active"} <= s.keys()
