@@ -12,7 +12,9 @@ With Docker:
 docker compose up --build
 ```
 
-Then open http://localhost:8000.
+Then open http://localhost:8000. On Windows or macOS, install [Docker Desktop](https://docs.docker.com/desktop/) first and start it. It is free for personal use, education and companies with fewer than 250 employees and under $10 million in yearly revenue. Larger companies need a paid Docker plan. The first build downloads about 1 GB.
+
+Docker keeps videos, clips and models in a volume named `clipforge_data`. Run `docker compose down -v` only if you want to delete them.
 
 Without Docker you need Python 3.11 or newer, Node 20 or newer, and ffmpeg:
 

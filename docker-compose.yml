@@ -6,7 +6,9 @@ services:
       # change this to "8000:8000", set APP_PASSWORD, and delete the ALLOW_NO_PASSWORD line below.
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./data:/data
+      # A Docker volume, not a folder on this computer: on Windows and macOS a shared folder is slow
+      # for big videos and can break the database's file locking. Download clips from the app.
+      - data:/data
     environment:
       APP_PASSWORD: ${APP_PASSWORD:-}
       # Safe only because the port above is bound to 127.0.0.1.
@@ -25,5 +27,9 @@ services:
     image: ollama/ollama:0.40.16
     profiles: ["llm"]
     volumes:
-      - ./data/ollama:/root/.ollama
+      - ollama:/root/.ollama
     restart: unless-stopped
+
+volumes:
+  data:
+  ollama:
