@@ -112,7 +112,10 @@ All settings are environment variables.
 | `MAX_UPLOAD_MB` | `8192` | Largest upload accepted. Videos longer than 12 hours are rejected |
 | `WORKERS` | `1` | Jobs processed at the same time. Each one uses all CPU cores, so raise it only on big machines |
 | `LIVE_ENABLED` | `1` | Set to `0` to turn off live monitoring |
-| `KEEP_HOURS` | `24` | Hours after which videos and their clips are deleted. `0` keeps everything |
+| `KEEP_HOURS` | `24` | Hours after which videos and their clips are deleted. `0` keeps everything. Without cloud storage only |
+| `R2_*`, `B2_*` | unset | Cloudflare R2 as primary storage and Backblaze B2 as verified backup; see [docs/STORAGE.md](docs/STORAGE.md) |
+| `SOURCE_KEEP_HOURS`, `CLIP_KEEP_DAYS`, `BACKUP_KEEP_DAYS` | `24`, `7`, `30` | Retention with cloud storage; a last copy is never deleted |
+| `STORAGE_STOP_AT_LIMIT` | `1` | Refuse uploads past each provider's free 10 GB instead of paying |
 
 ## AI providers
 

@@ -24,7 +24,7 @@ export default function Videos() {
           {videos.map((p) => (
             <Link key={p.id} to={`/projects/${p.id}`} className="project-card">
               <div className="frame">
-                {p.cover_clip_id && <img src={`/media/clips/${p.cover_clip_id}/thumb.jpg`} alt="" loading="lazy" />}
+                {p.cover_clip_id && <img src={`/api/files/clips/${p.cover_clip_id}/thumb.jpg`} alt="" loading="lazy" />}
               </div>
               <div>
                 <div className="name">{p.name}</div>

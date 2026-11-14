@@ -85,6 +85,27 @@ CREATE TABLE IF NOT EXISTS activity (
   at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS activity_at ON activity (at);
+-- Every stored copy of a file in object storage: the primary copy (R2) and its backup (B2) are separate rows,
+-- so a file is always fetched from a provider that recorded it, and cleanup can tell whether a copy is the last.
+CREATE TABLE IF NOT EXISTS files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,                -- file_id
+  user_id TEXT NOT NULL DEFAULT 'local',               -- one shared account today
+  owner_kind TEXT NOT NULL CHECK (owner_kind IN ('source', 'clip')),
+  owner_id INTEGER NOT NULL,
+  file_type TEXT NOT NULL,                             -- source_video, transcript, loudness, clip_video, thumbnail
+  storage_provider TEXT NOT NULL,                      -- r2 or b2
+  object_key TEXT NOT NULL,
+  file_size INTEGER NOT NULL DEFAULT 0,
+  md5 TEXT,
+  upload_status TEXT NOT NULL CHECK (upload_status IN ('pending', 'uploaded', 'failed', 'deleting')),
+  backup_status TEXT NOT NULL DEFAULT 'none' CHECK (backup_status IN ('none', 'pending', 'verified', 'failed', 'skipped')),
+  error TEXT,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL,
+  expires_at REAL,
+  UNIQUE (storage_provider, object_key)
+);
+CREATE INDEX IF NOT EXISTS files_owner ON files (owner_kind, owner_id, file_type);
 CREATE INDEX IF NOT EXISTS jobs_claim ON jobs (status, priority DESC, id);
 CREATE INDEX IF NOT EXISTS sources_project ON sources (project_id);
 CREATE INDEX IF NOT EXISTS clips_source ON clips (source_id);

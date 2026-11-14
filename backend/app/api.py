@@ -7,11 +7,11 @@ from urllib.parse import urlsplit
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 from starlette.requests import ClientDisconnect
 
-from . import db, pipeline
+from . import db, files, pipeline
 from .config import clip_dir, settings, source_dir
 from .highlights import LENGTHS
 from .live import platforms, signals, supervisor
@@ -90,11 +90,14 @@ def _get(table: str, row_id: int) -> dict:
 def _clip_out(c: dict) -> dict:
     version = int(c["rendered_at"] or 0)
     ready = c["status"] == "ready" or (c["rendered_at"] is not None and c["status"] != "failed")
-    base = f"/media/clips/{c['id']}"
+    base = f"/api/files/clips/{c['id']}"
+    stored = files.state("clip", c["id"])
+    ready = ready and not (stored and stored["location"] == "backup")  # archived: restore before viewing
     return {**c,
             "video_url": f"{base}/clip.mp4?v={version}" if ready else None,
             "thumb_url": f"{base}/thumb.jpg?v={version}" if ready else None,
-            "download_url": f"/api/clips/{c['id']}/download" if ready else None}
+            "download_url": f"/api/clips/{c['id']}/download" if ready else None,
+            "storage": stored}
 
 
 def _channel_out(ch: dict) -> dict:
@@ -103,7 +106,11 @@ def _channel_out(ch: dict) -> dict:
 
 def _source_out(s: dict) -> dict:
     playable = s["ext"] in BROWSER_PLAYABLE and s["status"] != "uploading"
-    return {**s, "video_url": f"/media/sources/{s['id']}/original{s['ext']}" if playable else None}
+    stored = files.state("source", s["id"])
+    expired = (files.enabled() and s["status"] in ("ready", "failed") and stored is None
+               and not (source_dir(s["id"]) / f"original{s['ext']}").exists())
+    return {**s, "video_url": f"/api/files/sources/{s['id']}/original{s['ext']}" if playable and not expired else None,
+            "storage": stored, "expired": expired}
 
 
 # Projects
@@ -296,14 +303,48 @@ def render_clip(cid: int) -> dict:
     return get_clip(cid)
 
 
+FILE_NAMES = {"clip.mp4": "clip_video", "thumb.jpg": "thumbnail"}
+
+
+def _serve(file_type: str, owner_id: int, path: Path, filename: str | None = None) -> Response:
+    """Primary storage through a short-lived signed URL; otherwise the local working copy. A file that only exists
+    as a backup has to be restored first, because primary storage is the download location."""
+    if url := files.url(file_type, owner_id, filename):
+        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})
+    if path.exists():
+        return FileResponse(path, filename=filename)
+    state = files.state("clip" if file_type in FILE_NAMES.values() else "source", owner_id)
+    if state and state["location"] == "backup":
+        raise HTTPException(409, "This file is only in the backup archive. Restore it first.")
+    raise HTTPException(404, "File not found")
+
+
+@router.get("/files/{kind}/{owner_id}/{name}")
+def serve_file(kind: Literal["clips", "sources"], owner_id: int, name: str) -> Response:
+    if kind == "clips":
+        if name not in FILE_NAMES:
+            raise HTTPException(404, "File not found")
+        return _serve(FILE_NAMES[name], owner_id, clip_dir(owner_id) / name)
+    src = _get("sources", owner_id)
+    if name != f"original{src['ext']}":
+        raise HTTPException(404, "File not found")
+    return _serve("source_video", owner_id, source_dir(owner_id) / name)
+
+
 @router.get("/clips/{cid}/download")
-def download_clip(cid: int) -> FileResponse:
+def download_clip(cid: int) -> Response:
     clip = _get("clips", cid)
-    path = clip_dir(cid) / "clip.mp4"
-    if not path.exists():
-        raise HTTPException(404, "This clip has not been rendered yet")
     slug = re.sub(r"[^a-z0-9]+", "-", clip["title"].lower()).strip("-")[:60] or "clip"
-    return FileResponse(path, media_type="video/mp4", filename=f"{slug}-{cid}.mp4")
+    return _serve("clip_video", cid, clip_dir(cid) / "clip.mp4", f"{slug}-{cid}.mp4")
+
+
+@router.post("/clips/{cid}/restore")
+def restore_clip(cid: int) -> dict:
+    """Copy a clip that only exists in the backup archive back into primary storage."""
+    _get("clips", cid)
+    if not files.restore("clip", cid):
+        raise HTTPException(409, "Nothing to restore: the clip is not in the backup archive only")
+    return get_clip(cid)
 
 
 @router.delete("/clips/{cid}", status_code=204)
@@ -352,6 +393,9 @@ def system() -> dict:
         "keep_hours": settings.keep_hours,
         "disk_free_bytes": disk.free,
         "disk_total_bytes": disk.total,
+        "storage": {"primary": settings.storage_primary, "backup": settings.storage_backup, "providers": files.quota(),
+                    "source_keep_hours": settings.source_keep_hours, "clip_keep_days": settings.clip_keep_days,
+                    "backup_keep_days": settings.backup_keep_days},
         "templates": len(TEMPLATES),
     }
 

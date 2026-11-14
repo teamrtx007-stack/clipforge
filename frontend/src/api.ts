@@ -35,6 +35,15 @@ export interface Source {
   error: string | null;
   created_at: number;
   video_url: string | null;
+  storage: StoredFile | null;
+  expired: boolean;
+}
+
+/** Where a file is kept: primary storage (R2), or only the backup archive (B2). Null when only on this computer. */
+export interface StoredFile {
+  location: "primary" | "backup";
+  provider: string;
+  backup: "none" | "pending" | "verified" | "failed" | "skipped";
 }
 
 export interface Clip {
@@ -56,6 +65,7 @@ export interface Clip {
   video_url: string | null;
   thumb_url: string | null;
   download_url: string | null;
+  storage: StoredFile | null;
   project_id?: number;
   project_name?: string;
   source_kind?: Source["kind"];
@@ -126,6 +136,14 @@ export interface SystemInfo {
   keep_hours: number;
   disk_free_bytes: number;
   disk_total_bytes: number;
+  storage: {
+    primary: string;
+    backup: string | null;
+    providers: Record<string, { used_bytes: number; free_bytes: number; percent: number; warning: boolean; full: boolean; role: string }>;
+    source_keep_hours: number;
+    clip_keep_days: number;
+    backup_keep_days: number;
+  };
 }
 
 export interface Stats {
@@ -174,6 +192,7 @@ export const api = {
   updateClip: (id: number, changes: Partial<Pick<Clip, "title" | "description" | "hashtags" | "start" | "end" | "template">>) =>
     request<Clip & { source: Source }>("PATCH", `/api/clips/${id}`, changes),
   renderClip: (id: number) => request<Clip>("POST", `/api/clips/${id}/render`),
+  restoreClip: (id: number) => request<Clip>("POST", `/api/clips/${id}/restore`),
   deleteClip: (id: number) => request<void>("DELETE", `/api/clips/${id}`),
 
   templates: () => request<Template[]>("GET", "/api/templates"),

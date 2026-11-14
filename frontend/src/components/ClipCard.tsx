@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { Clip } from "../api";
+import { api, message, type Clip } from "../api";
 import { duration, timecode } from "../format";
 
 const PICK = 70; // editors circle their picks; so do we
@@ -42,7 +42,9 @@ function FrameState({ clip }: { clip: Clip }) {
 
 export function ClipCard({ clip, small = false }: { clip: Clip; small?: boolean }) {
   const [hover, setHover] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const preview = hover && !small && clip.status === "ready" && clip.video_url;
+  const archived = clip.storage?.location === "backup";
   return (
     <article>
       <Link
@@ -57,7 +59,7 @@ export function ClipCard({ clip, small = false }: { clip: Clip; small?: boolean 
         ) : (
           clip.thumb_url && <img src={clip.thumb_url} alt="" loading="lazy" />
         )}
-        <FrameState clip={clip} />
+        {archived ? <div className="state">{restoring ? "Restoring from backup…" : "In the backup archive"}</div> : <FrameState clip={clip} />}
         <ScoreMark score={clip.score} />
         <div className="edge">
           <span>{timecode(clip.start)}</span>
@@ -71,6 +73,21 @@ export function ClipCard({ clip, small = false }: { clip: Clip; small?: boolean 
           {clip.download_url && clip.status === "ready" && (
             <div className="card-actions">
               <a className="btn quiet" href={clip.download_url} download>Download MP4</a>
+              {clip.storage?.backup === "verified" && <span className="tag">Backed up</span>}
+            </div>
+          )}
+          {archived && (
+            <div className="card-actions">
+              <button className="btn quiet" disabled={restoring}
+                onClick={() => {
+                  setRestoring(true);
+                  api.restoreClip(clip.id).catch((err) => {
+                    setRestoring(false);
+                    alert(message(err));
+                  });
+                }}>
+                Restore
+              </button>
             </div>
           )}
         </div>

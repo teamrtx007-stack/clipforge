@@ -254,6 +254,7 @@ textarea { resize: vertical; min-height: 84px; }
 .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--hairline); font-size: 13px; }
 .facts dt { color: #52525b; }
 .facts dd { margin: 0; font-weight: 600; text-align: right; }
+.facts .warn dt, .facts .warn dd { color: var(--danger); }
 .machine .card-actions { margin-top: auto; padding-top: 14px; align-items: center; }
 
 @media (max-width: 960px) {

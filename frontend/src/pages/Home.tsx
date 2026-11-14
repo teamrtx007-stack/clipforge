@@ -139,7 +139,16 @@ export default function Home() {
                 <div><dt>Cost</dt><dd>Free, ₹0</dd></div>
                 <div><dt>Speech to text</dt><dd>{speechLabel(system)}</dd></div>
                 <div><dt>AI titles and scoring</dt><dd>{system.llm.enabled ? [system.llm.host, ...system.llm.fallbacks].join(" → ") : "Off"}</dd></div>
-                <div><dt>Videos kept for</dt><dd>{system.keep_hours ? plural(system.keep_hours, "hour") : "Always"}</dd></div>
+                {system.storage.primary === "local" ? (
+                  <div><dt>Videos kept for</dt><dd>{system.keep_hours ? plural(system.keep_hours, "hour") : "Always"}</dd></div>
+                ) : (
+                  Object.entries(system.storage.providers).map(([name, p]) => (
+                    <div key={name} className={p.warning ? "warn" : undefined}>
+                      <dt>{p.role === "backup" ? "Backup" : "Cloud storage"} ({name.toUpperCase()})</dt>
+                      <dd>{(p.used_bytes / 1e9).toFixed(2)} of {p.free_bytes / 1e9} GB free{p.full ? ", full" : p.warning ? `, ${Math.round(p.percent)}%` : ""}</dd>
+                    </div>
+                  ))
+                )}
               </dl>
               <div className="card-actions">
                 <Link className="btn primary" to="/live">Add a creator</Link>
