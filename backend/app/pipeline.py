@@ -22,9 +22,8 @@ def _cached(path: Path, compute: Callable[[], object], save: Callable[[Path, obj
     if path.exists():
         return load(path)
     value = compute()
-    tmp = media.temp_path(path)
-    save(tmp, value)
-    tmp.replace(path)
+    with media.writing(path) as tmp:
+        save(tmp, value)
     return value
 
 
@@ -149,7 +148,8 @@ def analyze_source(source_id: int) -> None:
         )
         transcript = _cached(
             folder / "transcript.json",
-            lambda: transcribe.transcribe(wav, lambda p: stage("Transcribing speech", 0.05 + 0.8 * p))
+            lambda: transcribe.transcribe_file(wav, info.duration, folder, loudness,
+                                               lambda p: stage("Transcribing speech", 0.05 + 0.8 * p))
             if info.has_audio else {"language": None, "segments": []},
             _save_json, lambda p: json.loads(p.read_text()),
         )
@@ -157,13 +157,16 @@ def analyze_source(source_id: int) -> None:
         stage("Finding highlights", 0.88)
         meta = src["meta"]
         chat_path = folder / "chat.npy"
+        max_clips = meta.get("max_clips", 8)
+        # With AI on, a few extra candidates go in and its virality score decides which make the cut.
+        pool = max_clips + min(max_clips, 8) if settings.text_providers else max_clips
         found = highlights.find(
             transcript, loudness, info.duration, highlights.LENGTHS[meta.get("length", "medium")],
-            meta.get("max_clips", 8), must_include=meta.get("peak"),
+            pool, must_include=meta.get("peak"),
             chat=np.load(chat_path) if chat_path.exists() else None,
         )
         stage("Writing titles", 0.94)
-        described = describe.describe(found)
+        described = describe.describe(found)[:max_clips]
 
         with db.transaction():
             if db.one("SELECT id FROM sources WHERE id = ?", source_id) is None:
@@ -219,8 +222,7 @@ def render_clip(clip_id: int) -> None:
         ass = None
         if template.captions:
             transcript = json.loads((sfolder / "transcript.json").read_text())
-            words = [highlights.Word(w.start - start, w.end - start, w.text)
-                     for w in highlights.words_from(transcript) if w.start >= start and w.end <= end]
+            words = highlights.words_in(highlights.words_from(transcript), start, end)
             ass = folder / "captions.ass"
             ass.write_text(captions.build_ass(words, template.captions))
 

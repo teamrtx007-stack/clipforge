@@ -255,6 +255,17 @@ def _signals(w: _Window, z: np.ndarray, chat_z: np.ndarray | None, idf: dict[str
     return f, reasons, peak
 
 
+def words_in(words: list[Word], start: float, end: float) -> list[Word]:
+    """A clip's words in clip time. A word counts when most of it is inside, so a trim through a word
+    keeps its caption instead of dropping it while it is still heard."""
+    return [Word(max(w.start, start) - start, min(w.end, end) - start, w.text)
+            for w in words if start <= (w.start + w.end) / 2 < end]
+
+
+# Whisper's word times often run a little late, and a cut right on a word's edge clips its sound.
+LEAD_IN, TAIL = 0.25, 0.45
+
+
 def find(transcript: dict, loudness_db: np.ndarray, duration: float, length: ClipLength, max_clips: int,
          must_include: float | None = None, chat: np.ndarray | None = None) -> list[Candidate]:
     z = loudness_z(loudness_db)
@@ -286,7 +297,10 @@ def find(transcript: dict, loudness_db: np.ndarray, duration: float, length: Cli
         if f.get("topic", 0) >= 0.85 and keywords:
             reasons.append((f["topic"] * 0.8, "Focused on " + ", ".join(keywords[:2])))
         top_reasons = tuple(r for _, r in sorted(reasons, key=lambda r: -r[0])[:3])
-        candidates.append(Candidate(round(w.start, 2), round(w.end, 2), score, top_reasons,
+        room = max(0.0, length.max - (w.end - w.start) - 0.01)  # padding (after rounding) keeps the length promise
+        tail = min(TAIL, room, duration - w.end)
+        lead = min(LEAD_IN, room - tail, w.start)
+        candidates.append(Candidate(round(w.start - lead, 2), round(w.end + tail, 2), score, top_reasons,
                                     " ".join(s.text for s in w.sents), keywords, round(peak, 2)))
     return select(candidates, max_clips)
 
@@ -297,6 +311,7 @@ def select(candidates: list[Candidate], max_clips: int) -> list[Candidate]:
     for c in sorted(candidates, key=lambda c: (-c.score, abs(c.peak - (c.start + c.end) / 2), c.start)):
         if len(chosen) >= max_clips:
             break
-        if all(c.end <= o.start or c.start >= o.end for o in chosen):
+        # Neighbours may share their padding (the pause between sentences), never speech.
+        if all(c.end - LEAD_IN - TAIL <= o.start or c.start + LEAD_IN + TAIL >= o.end for o in chosen):
             chosen.append(c)
     return chosen

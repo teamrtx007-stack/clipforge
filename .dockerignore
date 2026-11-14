@@ -5,3 +5,5 @@ frontend/dist
 data
 backend/tests
 .git
+.env
+.env.*

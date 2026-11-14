@@ -5,3 +5,8 @@ __pycache__/
 frontend/dist/
 data/
 .pytest_cache/
+
+# Secrets: API keys live in .env, which must never be committed
+.env
+.env.*
+!.env.example

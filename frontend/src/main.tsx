@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Link, NavLink, Outlet, RouterProvider } from "react-router-dom";
 import { api } from "./api";
 import { Icon } from "./components/Icon";
-import { bytes } from "./format";
+import { bytes, speechLabel } from "./format";
 import { usePoll } from "./hooks";
 import ClipEditor from "./pages/ClipEditor";
 import Home from "./pages/Home";
@@ -45,7 +45,7 @@ function Sidebar() {
       {system && (
         <div className="side-card" title="Transcription and editing run on this computer. No paid APIs.">
           <span>Free · runs on this computer</span>
-          <b>Whisper {system.whisper_model}</b>
+          <b>{speechLabel(system)}</b>
           <span>{bytes(system.disk_free_bytes)} free on disk</span>
         </div>
       )}

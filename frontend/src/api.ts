@@ -119,7 +119,8 @@ export interface Job {
 
 export interface SystemInfo {
   whisper_model: string;
-  llm: { enabled: boolean; model: string | null; host: string | null };
+  llm: { enabled: boolean; model: string | null; host: string | null; fallbacks: string[] };
+  transcription: string[];
   live_enabled: boolean;
   workers: number;
   keep_hours: number;

@@ -6,7 +6,7 @@ import { ClipBox } from "../components/ClipBox";
 import { Icon, type IconName } from "../components/Icon";
 import { Bar } from "../components/Rows";
 import { ClipOptions } from "../components/Selects";
-import { bytes, CHANNEL_STATUS, plural, timecode } from "../format";
+import { bytes, CHANNEL_STATUS, plural, speechLabel, timecode } from "../format";
 import { usePoll } from "../hooks";
 import { useUploads } from "../uploads";
 
@@ -72,8 +72,8 @@ export default function Home() {
       detail: "Paste a YouTube link in the box above, or drop in a video file.",
     },
     system && !system.llm.enabled && {
-      title: "Turn on AI titles (optional)", to: "https://github.com/teamrtx007-stack/clipforge#configuration",
-      detail: "Run Ollama on this computer for better titles and hashtags. It is free too.",
+      title: "Turn on AI titles and scoring (optional)", to: "https://github.com/teamrtx007-stack/clipforge#ai-providers",
+      detail: "Add a free Gemini, Groq, Cloudflare or OpenRouter key to .env for better titles, Hindi included.",
     },
   ].filter((s) => !!s);
 
@@ -137,8 +137,8 @@ export default function Home() {
               <Bar value={system.disk_free_bytes / system.disk_total_bytes} />
               <dl className="facts">
                 <div><dt>Cost</dt><dd>Free, ₹0</dd></div>
-                <div><dt>Speech model</dt><dd>Whisper {system.whisper_model}</dd></div>
-                <div><dt>AI titles</dt><dd>{system.llm.enabled ? system.llm.model : "Off"}</dd></div>
+                <div><dt>Speech to text</dt><dd>{speechLabel(system)}</dd></div>
+                <div><dt>AI titles and scoring</dt><dd>{system.llm.enabled ? [system.llm.host, ...system.llm.fallbacks].join(" → ") : "Off"}</dd></div>
                 <div><dt>Videos kept for</dt><dd>{system.keep_hours ? plural(system.keep_hours, "hour") : "Always"}</dd></div>
               </dl>
               <div className="card-actions">

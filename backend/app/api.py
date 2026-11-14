@@ -341,11 +341,12 @@ def list_jobs(limit: int = 60) -> list[dict]:
 @router.get("/system")
 def system() -> dict:
     disk = shutil.disk_usage(settings.data_dir)
-    llm = settings.llm_base_url and settings.llm_model
+    ai = settings.text_providers[0] if settings.text_providers else None
     return {
         "whisper_model": settings.whisper_model,
-        "llm": {"enabled": bool(llm), "model": settings.llm_model if llm else None,
-                "host": re.sub(r"^https?://([^/]+).*$", r"\1", settings.llm_base_url) if llm else None},
+        "llm": {"enabled": bool(ai), "model": f"{ai.name}: {ai.model}" if ai else None, "host": ai.name if ai else None,
+                "fallbacks": [p.name for p in settings.text_providers[1:]]},
+        "transcription": list(settings.transcribe_providers),
         "live_enabled": settings.live_enabled,
         "workers": settings.workers,
         "keep_hours": settings.keep_hours,

@@ -22,6 +22,7 @@ ClipForge is free. It has no plans, no payments and no credits. Every feature be
 | 14 | Automatic cleanup: videos and clips deleted 24 hours after they are added | done |
 | 15 | Captions in Hindi, the other main Indian scripts and Urdu; characters no font can draw are left out, never boxes | done |
 | 16 | White dashboard: sidebar with creators, link box, stat cards, 14-day activity chart, creators table | done |
+| 17 | Free AI providers (Gemini, Groq, Cloudflare Workers AI, OpenRouter) with fallback, cloud speech to text, AI clip reranking | done (no real API call tested yet: no keys in the build environment) |
 
 ## Next
 
@@ -29,6 +30,9 @@ ClipForge is free. It has no plans, no payments and no credits. Every feature be
 - Chat analysis for YouTube and Kick.
 - Caption editor that fixes single words before rendering.
 - GPU encoding (NVENC) when a GPU is present.
+- GPU Whisper in Docker for the RTX 5070 Ti (needs CUDA 12.8+ libraries in the image; untested).
+- Gemini video understanding for scene-based scoring (free tier; uploads frames).
+- Deploy to an Oracle Always Free VM behind a Cloudflare Tunnel, after approval.
 
 ## Later, only if monetization is added
 
