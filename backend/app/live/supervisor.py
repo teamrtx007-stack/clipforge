@@ -245,6 +245,7 @@ class ChannelWorker(threading.Thread):
             if any(counts):  # chat per second, stretched to the pipeline's half-second hops
                 np.save(folder / "chat.npy", np.repeat(np.array(counts, np.float32), int(1 / media.HOP)))
             pipeline.queue_analysis(db.one("SELECT * FROM sources WHERE id = ?", sid))
+            db.record("moment")
         except Exception:  # e.g. the project was deleted, or the disk is full
             log.exception("could not save a live moment for channel %s", ch["id"])
             if sid is not None:

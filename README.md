@@ -65,9 +65,9 @@ To add a template, add one entry to `backend/app/templates.py`.
 
 | Part | Uses | Cost | Limits |
 |---|---|---|---|
-| Transcription | faster-whisper (MIT), models from Hugging Face | Free | One download per model. On a 4-core CPU, `small` runs at about 1x to 3x real time, so a 2-hour video can take an hour. `WHISPER_MODEL=base` is faster but less accurate. A CUDA GPU is used automatically if present. |
+| Transcription | faster-whisper (MIT), models from Hugging Face | Free | One download per model. On a 4-core CPU, `small` runs at about 1x to 3x real time, so a 2-hour video can take an hour. `WHISPER_MODEL=base` is faster but less accurate. For Hindi and other non-English speech, `WHISPER_MODEL=medium` is much more accurate but about 2x to 3x slower. A CUDA GPU is used automatically if present. |
 | Face tracking | OpenCV YuNet (MIT), bundled | Free | Follows the largest face. It does not detect who is speaking when two people are on screen. |
-| Editing and captions | ffmpeg, libass, Montserrat font (OFL), bundled | Free | Rendering a 45 s clip takes about 30 to 60 s on 4 cores. |
+| Editing and captions | ffmpeg, libass, Montserrat and Noto fonts (OFL), bundled | Free | Rendering a 45 s clip takes about 30 to 60 s on 4 cores. Captions draw Latin, Cyrillic, Hindi and the other main Indian scripts, and Urdu/Arabic. Characters in other scripts, such as Chinese, are left out of captions instead of showing as empty boxes. |
 | Highlight detection | Local scoring code | Free | Hook and emotion word lists are English. Other languages still score on loudness, topic and pace. |
 | Titles and hashtags | Local heuristic | Free | Plainer than an LLM's titles. |
 | AI titles (optional) | Any OpenAI-compatible endpoint | Free with Ollama on your machine | If you point it at a cloud provider, that provider's free tier limits and data terms apply. ClipForge never calls one unless you set `LLM_BASE_URL`. |
@@ -137,5 +137,6 @@ npm run dev
 
 - `backend/app/assets/models/face_detection_yunet_2023mar.onnx`. YuNet by Shiqi Yu, MIT license (`LICENSE-yunet`).
 - `backend/app/assets/fonts/Montserrat-*.ttf`. SIL Open Font License (`OFL-Montserrat.txt`).
+- `backend/app/assets/fonts/NotoSans*-Bold.ttf`. Noto Sans for Devanagari, Bengali, Gurmukhi, Gujarati, Tamil, Telugu, Kannada, Malayalam and Arabic, by the Noto Project Authors. SIL Open Font License (`OFL-Noto.txt`).
 - `backend/tests/assets/jfk.flac`. John F. Kennedy's 1961 inaugural address, public domain.
 - `backend/tests/assets/astronaut.png`. NASA portrait of Eileen Collins, public domain, via scikit-image.

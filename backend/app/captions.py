@@ -1,7 +1,10 @@
-"""Animated captions as ASS subtitles, burned in by ffmpeg's libass. Pure."""
+"""Animated captions as ASS subtitles, burned in by ffmpeg's libass."""
+import functools
+import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
+from .config import FONTS
 from .highlights import Word
 
 Animation = Literal["karaoke", "pop", "static"]
@@ -31,8 +34,26 @@ def _ts(t: float) -> str:
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
 
+@functools.cache
+def drawable() -> frozenset[int] | None:
+    """Code points the bundled fonts can draw: Latin and Cyrillic (Montserrat), the main Indian scripts and
+    Arabic (Noto). None when fontconfig's fc-scan is missing; then nothing is dropped."""
+    try:
+        out = subprocess.run(["fc-scan", "--format", "%{charset}\n", str(FONTS)],
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    points: set[int] = set()
+    for span in out.split():
+        lo, _, hi = span.partition("-")
+        points.update(range(int(lo, 16), int(hi or lo, 16) + 1))
+    return frozenset(points)
+
+
 def _clean(text: str, style: CaptionStyle) -> str:
     text = text.replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ").strip().rstrip(".,;:")
+    if (fonts := drawable()) is not None:  # a character no font has would burn in as an empty box
+        text = "".join(ch for ch in text if ord(ch) in fonts).strip()
     return text.upper() if style.uppercase else text
 
 

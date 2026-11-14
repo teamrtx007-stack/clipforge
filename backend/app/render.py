@@ -13,12 +13,11 @@ import cv2
 import numpy as np
 
 from .camera import CameraPath
-from .config import ASSETS
+from .config import FONTS
 from .media import MediaError, Probe, frames, tail, temp_path
 from .templates import Layout
 
 OUT_W, OUT_H = 1080, 1920
-FONTS = ASSETS / "fonts"
 MAX_DECODE_H = 1920
 
 

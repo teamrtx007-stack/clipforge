@@ -4,8 +4,8 @@ import { api, message, type ProjectSettings } from "../api";
 import { ClipCard } from "../components/ClipCard";
 import { KeepNote } from "../components/KeepNote";
 import { SourceRow, UploadRow } from "../components/Rows";
-import { LengthSelect, TemplateSelect } from "../components/Selects";
-import { UploadStrip } from "../components/UploadStrip";
+import { ClipBox } from "../components/ClipBox";
+import { ClipOptions } from "../components/Selects";
 import { usePoll } from "../hooks";
 import { useUploads } from "../uploads";
 
@@ -23,8 +23,6 @@ export default function ProjectPage() {
   const clipsBySource = (sid: number) => project.clips.filter((c) => c.source_id === sid).length;
   const save = (changes: { name?: string; settings?: ProjectSettings }) =>
     api.updateProject(id, changes).then(reload, (err) => alert(message(err)));
-  const setting = <K extends keyof ProjectSettings>(key: K) => (value: ProjectSettings[K]) =>
-    save({ settings: { ...project.settings, [key]: value } });
 
   return (
     <>
@@ -62,18 +60,11 @@ export default function ProjectPage() {
       </div>
 
       {!project.channel && (
-        <UploadStrip compact title="Add videos" hint="New videos use the clip length and template below."
+        <ClipBox
           onFiles={(files) => files.forEach((f) => uploads.start(id, f).then(reload, () => undefined))}
           onLink={(url) => api.addLink(id, url).then(reload)}>
-          <LengthSelect value={project.settings.length} onChange={setting("length")} />
-          <TemplateSelect value={project.settings.template} onChange={setting("template")} />
-          <label className="switch">
-            Up to
-            <input type="number" min={1} max={30} value={project.settings.max_clips}
-              onChange={(e) => e.target.valueAsNumber >= 1 && setting("max_clips")(Math.min(30, e.target.valueAsNumber))} />
-            clips per video
-          </label>
-        </UploadStrip>
+          <ClipOptions value={project.settings} onChange={(settings) => save({ settings })} />
+        </ClipBox>
       )}
 
       {(mine.length > 0 || project.sources.length > 0) && (

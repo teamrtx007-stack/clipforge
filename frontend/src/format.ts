@@ -33,3 +33,15 @@ export const LENGTH_LABELS = {
   medium: "Medium, 30 to 60 s",
   long: "Long, 60 to 90 s",
 } as const;
+
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+export const CHANNEL_STATUS = {
+  starting: "Checking",
+  offline: "Waiting for live",
+  live: "Live, not recording",
+  recording: "Recording",
+  error: "Error",
+  disabled: "Paused",
+  off: "Monitoring off",
+} as const;

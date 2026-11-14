@@ -244,3 +244,11 @@ class TestParsing:
         line = "@badge-info=;color=#FF0000 :bob!bob@bob.tmi.twitch.tv PRIVMSG #streamer :KEKW that was :D"
         assert chat.parse_message(line) == "KEKW that was :D"
         assert chat.parse_message(":tmi.twitch.tv 001 justinfan123 :Welcome") is None
+
+
+@pytest.mark.skipif(captions.drawable() is None, reason="needs fontconfig's fc-scan")
+def test_captions_never_burn_in_empty_boxes():
+    style = captions.CaptionStyle(animation="static", uppercase=False)
+    ass = captions.build_ass([Word(0, 1, "你好"), Word(1, 2, "देखो"), Word(2, 3, "سلام"), Word(3, 4, "ok")], style)
+    assert "देखो" in ass and "سلام" in ass and "ok" in ass, "Hindi, Urdu and Latin have bundled fonts"
+    assert "你" not in ass, "a script with no bundled font is left out rather than drawn as boxes"

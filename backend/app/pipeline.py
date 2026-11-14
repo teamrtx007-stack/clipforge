@@ -76,6 +76,7 @@ def remove_files(source_ids: list[int], clip_ids: list[int]) -> None:
 def expire(hours: float) -> None:
     """Delete videos and their clips once they are `hours` old, unless a job is still working on them,
     then projects left empty. ClipForge is a workbench, not an archive: people keep the clips they download."""
+    db.execute("DELETE FROM activity WHERE at < ?", db.now() - 31 * 86400)  # the chart shows at most 30 days
     if hours <= 0:
         return
     cutoff = db.now() - hours * 3600
@@ -178,6 +179,7 @@ def analyze_source(source_id: int) -> None:
                 for d in described
             ]
             db.update("sources", source_id, status="ready", stage="Done", progress=1.0)
+            db.record("video")
     for clip_id in old:
         shutil.rmtree(clip_dir(clip_id), ignore_errors=True)
     if meta.get("auto_render", True):
@@ -233,6 +235,7 @@ def render_clip(clip_id: int) -> None:
                WHERE id = ?""", db.now(), start, end, clip["template"], clip_id,
         ).rowcount:
             raise jobs.Gone()
+        db.record("clip")
 
 
 def _mark(table: str) -> Callable[[int, str], None]:
