@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .camera import CameraPath
+from .captions import fontconfig_file
 from .config import FONTS
 from .media import MediaError, Probe, frames, tail, temp_path
 from .templates import Layout
@@ -83,6 +84,7 @@ def render(video: Path, probe: Probe, start: float, end: float, camera: CameraPa
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high",
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-shortest", tmp.name],
         stdin=subprocess.PIPE, stderr=enc_err, cwd=out.parent,
+        env={**os.environ, "FONTCONFIG_FILE": str(fontconfig_file())} if captions is not None else None,
     )
     source = frames(video, start, dur, *decode_size(probe.width, probe.height), fps)
     total = max(1, round(dur * fps))

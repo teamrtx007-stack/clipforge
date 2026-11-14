@@ -2,9 +2,11 @@
 import functools
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
+from xml.sax.saxutils import escape
 
-from .config import FONTS
+from .config import FONTS, settings
 from .highlights import Word
 
 Animation = Literal["karaoke", "pop", "static"]
@@ -32,6 +34,26 @@ def _ass_color(rgb: str, alpha: int = 0) -> str:
 def _ts(t: float) -> str:
     cs = max(0, round(t * 100))
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
+
+
+SYSTEM_FONTS_CONF = "/etc/fonts/fonts.conf"
+
+
+@functools.cache
+def fontconfig_file() -> Path:
+    """Fontconfig settings that add the bundled fonts to the system's. libass draws a letter missing from the
+    caption font with a fallback font found through fontconfig only; fonts given to ffmpeg with fontsdir are
+    not part of that search. So on a machine with no Hindi font of its own, such as the Docker image, Hindi
+    came out as boxes. The encoder runs with FONTCONFIG_FILE pointing here."""
+    folder = settings.data_dir / "fontconfig"
+    folder.mkdir(parents=True, exist_ok=True)
+    conf = folder / "fonts.conf"
+    conf.write_text(
+        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n'
+        f'  <include ignore_missing="yes">{escape(SYSTEM_FONTS_CONF)}</include>\n'
+        f"  <dir>{escape(str(FONTS))}</dir>\n  <cachedir>{escape(str(folder / 'cache'))}</cachedir>\n</fontconfig>\n"
+    )
+    return conf
 
 
 @functools.cache
