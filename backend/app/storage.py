@@ -2,17 +2,21 @@
 
 Buckets are private. The browser only ever gets short-lived signed URLs; credentials stay on the server
 (this process's environment) and never appear in errors, logs or API answers.
-Run `python -m app.storage` to check each configured bucket with one tiny round trip.
+Run `python -m app.storage` to check each configured bucket, and the backup and restore between them, with
+small throwaway test files that are deleted at the end. It never touches real videos or the database.
 """
 import base64
 import functools
 import hashlib
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
 import boto3
+from boto3.exceptions import Boto3Error
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
@@ -22,6 +26,8 @@ from .config import Bucket, settings
 
 SINGLE_PUT_LIMIT = 100 * 1024 * 1024  # up to here one PUT with Content-MD5; above, multipart
 URL_SECONDS = 3600
+LINK_TEST_SECONDS = 5  # the check signs a link valid this long, then makes sure the provider refuses it after
+LINK_TEST_WAIT = 10  # seconds to wait before trying the expired link: tolerates this computer's clock being a bit off
 
 
 class StorageError(Exception):
@@ -61,14 +67,25 @@ class ObjectStorage:
         self._urls: dict[tuple, tuple[str, float]] = {}
         self._lock = threading.Lock()
 
+    def _error(self, what: str, exc: Exception) -> StorageError:
+        """A readable error with the provider's own explanation, e.g. "(InvalidArgument: Credential access key has
+        length 31, should be 32)". The key id and secret are cut out in case a provider ever echoes them."""
+        if isinstance(exc, ClientError):
+            err = exc.response.get("Error") or {}
+            code = err.get("Code") or str((exc.response.get("ResponseMetadata") or {}).get("HTTPStatusCode", "error"))
+            detail = f"{code}: {err['Message']}" if err.get("Message") and err["Message"] != code else code
+        else:
+            detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        for secret in (self.config.secret, self.config.key_id):
+            if secret:
+                detail = detail.replace(secret, "***")
+        return StorageError(f"{self.name}: {what} failed ({detail[:300]})")
+
     def _call(self, what: str, fn, *args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except ClientError as exc:
-            code = exc.response.get("Error", {}).get("Code", "error")
-            raise StorageError(f"{self.name}: {what} failed ({code})") from exc
-        except (BotoCoreError, OSError) as exc:
-            raise StorageError(f"{self.name}: {what} failed ({type(exc).__name__})") from exc
+        except (ClientError, BotoCoreError, Boto3Error, OSError) as exc:  # Boto3Error: a failed multipart upload
+            raise self._error(what, exc) from exc
 
     def put(self, key: str, path: Path, content_type: str, md5: str | None = None) -> tuple[int, str]:
         """Upload a whole file and return (size, md5). Files up to 100 MB carry Content-MD5, so the provider
@@ -93,9 +110,9 @@ class ObjectStorage:
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
                 return None
-            raise StorageError(f"{self.name}: check failed ({exc.response.get('Error', {}).get('Code')})") from exc
+            raise self._error("check", exc) from exc
         except (BotoCoreError, OSError) as exc:
-            raise StorageError(f"{self.name}: check failed ({type(exc).__name__})") from exc
+            raise self._error("check", exc) from exc
         return head["ContentLength"], head.get("Metadata", {}).get("md5")
 
     def verify(self, key: str, size: int, md5: str) -> bool:
@@ -111,18 +128,29 @@ class ObjectStorage:
     def delete(self, key: str) -> None:
         self._call("delete", self._client.delete_object, Bucket=self.bucket, Key=key)  # no error if already gone
 
-    def url(self, key: str, filename: str | None = None) -> str:
+    def old_versions(self, key: str) -> int:
+        """How many hidden old versions of a deleted key the bucket still keeps (and bills). 0 where the
+        provider has no versioning (R2)."""
+        return 0
+
+    def purge(self, key: str) -> None:
+        """Delete a key and any old versions of it. Only used for the check's own test files."""
+        self.delete(key)
+
+    def url(self, key: str, filename: str | None = None, expires: int = URL_SECONDS) -> str:
         """A signed GET URL valid for an hour. Reused for half an hour, so a page that polls keeps the same
         URL and a playing video does not restart. Signing happens locally: no request is made."""
         cache_key = (key, filename)
         with self._lock:
             cached = self._urls.get(cache_key)
-            if cached and time.time() - cached[1] < URL_SECONDS / 2:
+            if expires == URL_SECONDS and cached and time.time() - cached[1] < URL_SECONDS / 2:
                 return cached[0]
             params = {"Bucket": self.bucket, "Key": key}
             if filename:
                 params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
-            url = self._client.generate_presigned_url("get_object", Params=params, ExpiresIn=URL_SECONDS)
+            url = self._client.generate_presigned_url("get_object", Params=params, ExpiresIn=expires)
+            if expires != URL_SECONDS:
+                return url
             self._urls[cache_key] = (url, time.time())
             if len(self._urls) > 5000:
                 self._urls.clear()
@@ -135,6 +163,20 @@ class CloudflareR2Storage(ObjectStorage):
 
 class BackblazeB2Storage(ObjectStorage):
     name = "b2"
+
+    def _versions(self, key: str) -> list[dict]:
+        found = self._call("version listing", self._client.list_object_versions, Bucket=self.bucket, Prefix=key)
+        return [v for v in found.get("Versions", []) + found.get("DeleteMarkers", []) if v["Key"] == key]
+
+    def old_versions(self, key: str) -> int:
+        """Deleting a B2 file only hides it, and a hidden file still counts toward the 10 GB: forever with the
+        default lifecycle "Keep all versions", about a day with "Keep only the last version"."""
+        return sum(1 for v in self._versions(key) if "Size" in v)
+
+    def purge(self, key: str) -> None:
+        self.delete(key)
+        for v in self._versions(key):
+            self._call("delete", self._client.delete_object, Bucket=self.bucket, Key=key, VersionId=v["VersionId"])
 
 
 PROVIDERS: dict[str, type[ObjectStorage]] = {"r2": CloudflareR2Storage, "b2": BackblazeB2Storage}
@@ -153,35 +195,112 @@ def backup() -> ObjectStorage | None:
     return provider(settings.storage_backup) if settings.storage_backup else None
 
 
+def _fetch(url: str) -> tuple[int, bytes]:
+    """GET a URL the way a browser would, without credentials: (HTTP status, body)."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, b""
+
+
+class CheckFailed(Exception):
+    pass
+
+
+def _expect(ok: bool, step: str) -> None:
+    if not ok:
+        raise CheckFailed(step)
+
+
 def check() -> int:
-    """Upload, verify, sign, download and delete one tiny object in each configured bucket."""
+    """Check every configured bucket with throwaway files under clipforge-check/, deleted at the end:
+    upload, verify, signed URL, link expiry, download and delete in each bucket; then, with both buckets,
+    a backup from primary to backup storage and a restore back. Never touches real videos or the database."""
     if not settings.buckets:
         print("No bucket is configured: files stay on this computer. Set the R2_* and B2_* variables.")
         return 0
     print(f"Primary: {settings.storage_primary}. Backup: {settings.storage_backup or 'none'}.")
-    failed = 0
-    tmp = settings.data_dir / f"storage-check-{uuid.uuid4().hex}.txt"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_text("ClipForge storage check\n")
+    run = uuid.uuid4().hex
+    work = settings.data_dir / "tmp" / f"storage-check-{run}"
+    work.mkdir(parents=True, exist_ok=True)
+    src = work / "test.txt"
+    src.write_text(f"ClipForge storage check {run}\n")
+    data, failed, notes = src.read_bytes(), 0, []
+    stores = {name: provider(name) for name in settings.buckets}
+    key = f"clipforge-check/{run}.txt"
+
+    def fail(label: str, exc: Exception) -> None:
+        nonlocal failed
+        failed += 1
+        reason = str(exc)
+        if isinstance(exc, CheckFailed) and exc.args[0] == "link expiry":
+            reason = "link expiry: an expired link still worked (or this computer's clock is off by over 5 s)"
+        print(f"  FAIL  {label}: {reason}")
+
     try:
-        for name in settings.buckets:
-            store, key = provider(name), f"clipforge-check/{tmp.name}"
+        # 1. Each bucket: upload, verify, a signed link that works, and a short one that must stop working.
+        short, passed, healthy = {}, [], []
+        for name, store in stores.items():
             try:
-                size, md5 = store.put(key, tmp, "text/plain")
-                ok = store.verify(key, size, md5)
-                store.url(key)
-                store.get(key, tmp.with_suffix(".back"))
-                ok = ok and md5_of(tmp.with_suffix(".back")) == md5
+                size, md5 = store.put(key, src, "text/plain")
+                _expect(store.verify(key, size, md5), "verify after upload")
+                _expect(_fetch(store.url(key)) == (200, data), "signed URL download")
+                short[name] = store.url(key, expires=LINK_TEST_SECONDS)
+                _expect(_fetch(short[name])[0] == 200, "fresh short link (is this computer's clock right?)")
+                passed.append(name)
+            except (StorageError, CheckFailed) as exc:
+                fail(f"{name} bucket {store.bucket}", exc)
+        if short:
+            time.sleep(LINK_TEST_WAIT)
+        for name in passed:
+            store = stores[name]
+            try:
+                _expect(_fetch(short[name])[0] in (400, 401, 403), "link expiry")
+                store.get(key, work / f"{name}.back")
+                _expect((work / f"{name}.back").read_bytes() == data, "download")
                 store.delete(key)
-                print(f"  {'ok  ' if ok else 'FAIL'}  {name} bucket {store.bucket}: upload, verify, signed URL, download, delete")
-                failed += not ok
-            except StorageError as exc:
-                failed += 1
-                print(f"  FAIL  {name} bucket {store.bucket}: {exc}")
-            finally:
-                tmp.with_suffix(".back").unlink(missing_ok=True)
+                _expect(store.stat(key) is None, "delete")
+                if store.old_versions(key):
+                    notes.append(f"{name} bucket {store.bucket} keeps deleted files as hidden versions, which count "
+                                 "toward the free 10 GB until its lifecycle removes them. Make sure its Lifecycle "
+                                 "Settings say 'Keep only the last version' (they cannot be read from here)")
+                healthy.append(name)
+                print(f"  ok    {name} bucket {store.bucket}: upload, verify, signed URL, link expiry, download, delete")
+            except (StorageError, CheckFailed) as exc:
+                fail(f"{name} bucket {store.bucket}", exc)
+
+        # 2. Backup and restore: primary -> backup verified, primary copy lost, backup -> primary verified.
+        primary_name, backup_name = settings.storage_primary, settings.storage_backup
+        if primary_name in healthy and backup_name in healthy:
+            first, second, label = stores[primary_name], stores[backup_name], f"backup {primary_name} -> {backup_name}"
+            try:
+                size, md5 = first.put(key, src, "text/plain")
+                first.get(key, work / "for-backup")
+                second.put(key, work / "for-backup", "text/plain", md5)
+                _expect(second.verify(key, size, md5), "backup verify (size and checksum)")
+                first.delete(key)
+                _expect(first.stat(key) is None, "primary copy removed")
+                label = f"restore {backup_name} -> {primary_name}"
+                second.get(key, work / "restored")
+                first.put(key, work / "restored", "text/plain", md5)
+                _expect(first.verify(key, size, md5), "restore verify (size and checksum)")
+                _expect(_fetch(first.url(key)) == (200, data), "download of the restored copy")
+                print(f"  ok    backup {primary_name} -> {backup_name} and restore {backup_name} -> {primary_name}: "
+                      "size and checksum verified")
+            except (StorageError, CheckFailed) as exc:
+                fail(label, exc)
     finally:
-        tmp.unlink(missing_ok=True)
+        for store in stores.values():
+            try:
+                store.purge(key)
+            except StorageError as exc:
+                print(f"  note  could not remove the test file {key} from {store.name}: {exc}")
+        for path in work.iterdir():
+            path.unlink(missing_ok=True)
+        work.rmdir()
+    for note in notes:
+        print(f"  note  {note}")
     return 1 if failed else 0
 
 

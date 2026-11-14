@@ -72,22 +72,25 @@ A success resets the key's strikes. Each attempt has its own timeout (60 s text,
 
 You need a free Supabase account, a free project, and Node.js for the Supabase CLI (`winget install OpenJS.NodeJS.LTS`). Run everything from the `clipforge` folder.
 
-1. Log in and link the project. The project ref is in the dashboard URL, `supabase.com/dashboard/project/<ref>`.
+1. Log in first, then link the project. The project ref is in the dashboard URL, `supabase.com/dashboard/project/<ref>`. Every later step needs the login: "Access token not provided" means `login` has not run yet.
    ```bash
    npx supabase@latest login
    ```
    ```bash
    npx supabase@latest link --project-ref <your-project-ref>
    ```
-2. Create the tables:
+2. Create the tables in your Supabase project. `--remote` matters: without it, current CLI versions push to a local Supabase stack instead of your project:
    ```bash
-   npx supabase@latest db push
+   npx supabase@latest db push --remote
    ```
 3. Make a gateway token with a secure random generator:
    ```bash
    docker compose exec clipforge python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
-4. Open Notepad and save a file `supabase\.env.secrets` (Git ignores it) with your keys, one secret per line, several keys separated by commas:
+4. Open Notepad and save a file `%USERPROFILE%\clipforge-secrets.env` with your keys, one secret per line, several keys separated by commas. Keep it outside the ClipForge folder: if that folder is on a OneDrive Desktop, OneDrive would upload the file to Microsoft's cloud.
+   ```bash
+   notepad %USERPROFILE%\clipforge-secrets.env
+   ```
    ```
    GATEWAY_TOKEN=<the token from step 3>
    GEMINI_API_KEYS=<gemini key 1>,<gemini key 2>
@@ -97,15 +100,16 @@ You need a free Supabase account, a free project, and Node.js for the Supabase C
    Optional: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKENS`, `OPENROUTER_API_KEYS`, model overrides such as `GROQ_MODEL`.
 5. Upload the secrets, then delete the file:
    ```bash
-   npx supabase@latest secrets set --env-file supabase/.env.secrets
+   npx supabase@latest secrets set --env-file %USERPROFILE%\clipforge-secrets.env
    ```
    ```bash
-   del supabase\.env.secrets
+   del %USERPROFILE%\clipforge-secrets.env
    ```
 6. Deploy the function:
    ```bash
    npx supabase@latest functions deploy ai-gateway --no-verify-jwt
    ```
+   If `secrets set` or `functions deploy` reports a local stack or no linked project, add `--project-ref <your-project-ref>` to that command.
 7. In ClipForge's `.env`, remove any provider keys and add:
    ```
    GATEWAY_URL=https://<your-project-ref>.supabase.co/functions/v1/ai-gateway
