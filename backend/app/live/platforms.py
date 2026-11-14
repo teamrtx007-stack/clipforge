@@ -45,7 +45,7 @@ def check_direct_host(url: str) -> None:
     for addr in addresses:
         ip = ipaddress.ip_address(addr.split("%")[0])
         if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
-            raise ValueError("That address is not allowed as a stream source")
+            raise ValueError("That address is not allowed")
 
 
 def parse(url: str) -> Target:

@@ -2,6 +2,7 @@
 import base64
 import binascii
 import hmac
+import logging
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,6 +46,16 @@ def refusal(method: str, host: str, origin: str | None) -> str | None:
     return None
 
 
+def _expire_loop(stop: threading.Event) -> None:
+    while True:
+        try:
+            pipeline.expire(settings.keep_hours)
+        except Exception:  # e.g. the database is briefly locked; try again next round
+            logging.getLogger(__name__).exception("cleanup failed")
+        if stop.wait(600):
+            return
+
+
 def create_app(background: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -55,6 +66,7 @@ def create_app(background: bool = True) -> FastAPI:
             jobs.recover_stale()
             jobs.start(settings.workers, stop, live_lane=settings.live_enabled)
             supervisor.start(stop)
+            threading.Thread(target=_expire_loop, args=(stop,), name="expire", daemon=True).start()
         yield
         stop.set()
         jobs.wake()

@@ -4,6 +4,8 @@ ClipForge turns long videos and livestreams into vertical short clips. It finds 
 
 It is free. Every AI model runs on your own computer, and ClipForge never calls a paid API.
 
+ClipForge is a workbench, not an archive. It deletes videos and clips 24 hours after you add them, so download the clips you want to keep.
+
 ## Quick start
 
 With Docker:
@@ -26,12 +28,13 @@ The first video you process downloads the Whisper speech model from Hugging Face
 
 ## What you can do
 
-**Clip a long video.** Drop a video on the dashboard and pick a clip length (15 to 30 s, 30 to 60 s, or 60 to 90 s) and a template. ClipForge runs these steps:
+**Clip a long video.** Drop a video on the dashboard, or paste a YouTube link, and pick a clip length (15 to 30 s, 30 to 60 s, or 60 to 90 s) and a template. ClipForge runs these steps:
 
-1. It transcribes the speech with word-level timing.
-2. It scores every sentence-aligned window for hook, loudness, topic focus, emotion, pace, clean ending and length fit.
-3. It keeps the best windows that do not overlap.
-4. It renders each one as a 1080x1920 MP4.
+1. For a link, it downloads the video, up to 1080p. Links from about a thousand other video sites work too.
+2. It transcribes the speech with word-level timing.
+3. It scores every sentence-aligned window for hook, loudness, topic focus, emotion, pace, clean ending and length fit.
+4. It keeps the best windows that do not overlap.
+5. It renders each one as a 1080x1920 MP4.
 
 Each clip shows its score and the reasons it was picked, for example "Opens with a question" or "Loud reaction at 12:03". A score of 70 or more gets a red circle.
 
@@ -68,9 +71,10 @@ To add a template, add one entry to `backend/app/templates.py`.
 | Highlight detection | Local scoring code | Free | Hook and emotion word lists are English. Other languages still score on loudness, topic and pace. |
 | Titles and hashtags | Local heuristic | Free | Plainer than an LLM's titles. |
 | AI titles (optional) | Any OpenAI-compatible endpoint | Free with Ollama on your machine | If you point it at a cloud provider, that provider's free tier limits and data terms apply. ClipForge never calls one unless you set `LLM_BASE_URL`. |
+| Video links | yt-dlp (Unlicense) with the Deno runtime (MIT) | Free | YouTube changes its site often. When links stop working, run `docker compose build --no-cache` to get the newest yt-dlp. Download only videos you own or have permission to use: YouTube's terms forbid downloading other videos. |
 | Live recording | streamlink (BSD-2) and ffmpeg | Free | Uses your bandwidth while a channel is live. Sites change often, so keep streamlink updated. |
 | Live chat | Twitch anonymous IRC | Free | Twitch only. YouTube and Kick clips use audio and speech. |
-| Storage | Your disk | Free | Renders stay until you delete the project. |
+| Storage | Your disk | Free | Videos and clips are deleted 24 hours after you add them (`KEEP_HOURS`). Whisper models stay, so they download once. |
 
 ### Free hosting, honestly
 
@@ -102,6 +106,7 @@ All settings are environment variables.
 | `MAX_UPLOAD_MB` | `8192` | Largest upload accepted. Videos longer than 12 hours are rejected |
 | `WORKERS` | `1` | Jobs processed at the same time. Each one uses all CPU cores, so raise it only on big machines |
 | `LIVE_ENABLED` | `1` | Set to `0` to turn off live monitoring |
+| `KEEP_HOURS` | `24` | Hours after which videos and their clips are deleted. `0` keeps everything |
 
 ## How it works
 

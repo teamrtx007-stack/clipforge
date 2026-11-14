@@ -17,11 +17,12 @@ ClipForge is free. It has no plans, no payments and no credits. Every feature be
 | 9 | Rolling buffer: segmented recording with pruning, clips cut from the buffer | done |
 | 10 | Audio, speech and chat analysis: loudness spikes, real-time speech, Twitch chat rate | done |
 | 11 | Multi-stream monitoring: one supervisor thread per channel, shared queue | done |
-| 12 | Testing and deployment: pytest, end-to-end runs, Docker, free hosting guide | done (Docker build not yet run end to end) |
+| 12 | Testing and deployment: pytest, end-to-end runs, Docker, free hosting guide | done |
+| 13 | Paste a YouTube link: yt-dlp downloads it, then the same pipeline runs | done |
+| 14 | Automatic cleanup: videos and clips deleted 24 hours after they are added | done |
 
 ## Next
 
-- Import VODs by URL with yt-dlp.
 - Split-screen layout (face cam on top, gameplay below).
 - Chat analysis for YouTube and Kick.
 - Caption editor that fixes single words before rendering.

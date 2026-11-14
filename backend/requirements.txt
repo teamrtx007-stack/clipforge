@@ -4,3 +4,5 @@ faster-whisper==1.2.1
 opencv-python-headless==5.0.0.93
 numpy==2.5.4
 streamlink==8.6.3
+# A floor, not a pin: YouTube changes often and only a recent yt-dlp keeps up. Rebuild to update it.
+yt-dlp[default,deno]>=2026.10.26

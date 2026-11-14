@@ -9,8 +9,8 @@ Video work is heavy. Transcription, face detection and encoding use a lot of CPU
 ## Usage (the user's view)
 
 1. Run `docker compose up` (or `./run.sh`) and open `http://localhost:8000`.
-2. Create a project, drop in a long video, and pick a clip length and template.
-3. The project page shows progress. It runs through upload, probe, transcription, highlight detection and rendering.
+2. Drop in a long video or paste a YouTube link, and pick a clip length and template.
+3. The project page shows progress. It runs through upload or download, probe, transcription, highlight detection and rendering.
 4. Each clip card shows a 9:16 preview, a score from 0 to 100, the reasons it was picked, a title, a description and hashtags.
 5. On a clip you can trim it, edit the text, switch the template, re-render, and download the MP4.
 6. In Live Studio, add a Twitch, YouTube, Kick or direct HLS URL. ClipForge watches it. It records into a rolling buffer when the channel goes live. It cuts a clip when the audio, chat and speech signals spike, and the clip flows through the same pipeline.
@@ -22,6 +22,7 @@ Video work is heavy. Transcription, face detection and encoding use a lot of CPU
 ```
 Project  id, name, settings{clip_length, max_clips, template}
 Source   id, project_id, kind(upload|live), status(queued|processing|ready|failed),
+         meta{length, max_clips, template, url?: a pasted link, downloaded by the analyze job},
          stage, progress, duration, width, height, fps, channel_id?, error
 Clip     id, source_id, start, end, score, title, description, hashtags[], reasons[],
          template, status(queued|rendering|ready|failed), progress, error
@@ -31,7 +32,7 @@ Channel  id, platform, url, name, enabled, auto_record, auto_render, chat, speec
          sensitivity, template, buffer_minutes
 ```
 
-Files live under `data/`. Paths are derived from ids and never stored. `data/sources/<id>/` holds the original video, `audio.wav`, `transcript.json` and `analysis.json`. `data/clips/<id>/` holds `clip.mp4`, `thumb.jpg` and `captions.ass`.
+Files live under `data/`. Paths are derived from ids and never stored. `data/sources/<id>/` holds the original video, `audio.wav`, `transcript.json` and `analysis.json`. `data/clips/<id>/` holds `clip.mp4`, `thumb.jpg` and `captions.ass`. A cleanup thread deletes sources and their clips `KEEP_HOURS` (24) after they were added, never while a job uses them, then projects left empty. The user keeps what they download.
 
 ### Load-bearing decisions
 
@@ -114,13 +115,12 @@ A is the base. B's only win is multi-machine scale, which a free, single-user to
 
 ### Scope challenge
 
-The plan builds exactly the feature list in the brief. It adds nothing for billing, plans or payments. Two cuts keep it honest. Chat analysis covers Twitch only, and there is no URL import from YouTube for VODs. Both are listed below so they are visible, not forgotten.
+The plan builds exactly the feature list in the brief. It adds nothing for billing, plans or payments. Two cuts keep it honest. Chat analysis covers Twitch only. It is listed below so it is visible, not forgotten.
 
 ### Not in scope
 
 - Subscriptions, payments, credits, billing dashboards, revenue tracking. These are excluded on purpose.
 - User accounts and teams. One shared password protects a public deployment.
-- Importing VODs by URL (yt-dlp). Upload a file instead.
 - Auto-posting to TikTok, YouTube or Instagram.
 - B-roll, music beds, emoji overlays, caption translation.
 - Chat analysis for YouTube and Kick.
@@ -130,6 +130,9 @@ The plan builds exactly the feature list in the brief. It adds nothing for billi
 | Path | Realistic failure | Handling | User sees |
 |---|---|---|---|
 | Upload | Connection drops mid-file | Body streams to `upload.part`, renamed only when complete | Upload error, nothing half-saved |
+| Link | YouTube blocks the download or changes its site | yt-dlp's message goes to `Source.error`; the job tries once more | The reason on the video row, with a retry button |
+| Link | Playlist, live video, over 12 hours or over the size limit | Checked from the page info before downloading | The reason on the video row |
+| Storage | Videos pile up on the disk | Deleted `KEEP_HOURS` after they were added, checked every 10 minutes | A note above the clips says so |
 | Probe | File is not a video | ffprobe error goes to `Source.error` | "Not a playable video" on the card |
 | Probe | File claims an absurd length (forged metadata) | Over 12 hours is rejected, which bounds every array sized by duration | "Videos longer than 12 hours are not supported" |
 | Audio | Video has no audio track | Empty transcript and flat loudness, windows come from the even split | Clips with no captions, no crash |
@@ -156,6 +159,7 @@ No failure is silent and untested and unhandled at once, so there are no critica
 
 - Pure units: window building, scoring order, overlap selection, `must_include`, caption timing and escaping, camera smoothing and clamping, auto layout fallback, spike detection with warmup and cooldown, Twitch IRC parsing, heuristic titles.
 - Queue: two threads never claim the same job, stale `running` jobs reset, failures mark the target failed.
+- Links and cleanup: a video served by a local web server downloads, takes its title and is clipped; a 404 fails with a readable reason; cleanup never deletes what a job uses (`tests/test_links.py`).
 - API: project CRUD, upload type and size checks, partial upload cleanup, clip edit and re-render, auth on and off.
 - End to end on a real generated video (a moving face photo and a real speech recording): analyze, then render. Check a 1080x1920 MP4 with audio, that the crop follows the face, and that the caption events exist (`tests/test_pipeline_e2e.py`).
 - The live recording loop at full speed with a fake recorder: one shout gives one moment, cut while the stream is still recording (`tests/test_live_loop.py`, under a second).

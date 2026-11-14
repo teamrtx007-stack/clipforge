@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, message, type ClipLength } from "../api";
 import { ClipCard } from "../components/ClipCard";
+import { KeepNote } from "../components/KeepNote";
 import { LengthSelect, TemplateSelect } from "../components/Selects";
 import { UploadStrip } from "../components/UploadStrip";
 import { ago, bytes } from "../format";
@@ -30,12 +31,24 @@ export default function Dashboard() {
     }
   }
 
+  async function startFromLink(url: string) {
+    const project = await api.createProject(url.slice(0, 120), { length, template }); // renamed to the video's title
+    try {
+      await api.addLink(project.id, url);
+    } catch (err) {
+      await api.deleteProject(project.id).catch(() => undefined);
+      throw err;
+    }
+    navigate(`/projects/${project.id}`);
+  }
+
   return (
     <>
       <UploadStrip
         title="Drop a long video. Get shorts."
         hint="ClipForge finds the moments worth sharing and cuts them into vertical clips with captions, face tracking and titles. Everything runs on this computer, for free."
         onFiles={startProject}
+        onLink={startFromLink}
       >
         <LengthSelect value={length} onChange={setLength} />
         <TemplateSelect value={template} onChange={setTemplate} />
@@ -46,6 +59,7 @@ export default function Dashboard() {
         <div className="section-head">
           <h2 className="display">Latest clips</h2>
         </div>
+        <KeepNote />
         {clips.data?.length ? (
           <div className="sheet small">
             {clips.data.map((c) => <ClipCard key={c.id} clip={c} small />)}
@@ -80,7 +94,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          projects.data && <div className="empty">No projects yet. Drop a video above to start one.</div>
+          projects.data && <div className="empty">No projects yet. Drop a video or paste a link above to start one.</div>
         )}
       </section>
     </>

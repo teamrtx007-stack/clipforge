@@ -2,6 +2,7 @@
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -104,13 +105,6 @@ def _source_out(s: dict) -> dict:
     return {**s, "video_url": f"/media/sources/{s['id']}/original{s['ext']}" if playable else None}
 
 
-def _remove_files(source_ids: list[int], clip_ids: list[int]) -> None:
-    for sid in source_ids:
-        shutil.rmtree(source_dir(sid), ignore_errors=True)
-    for cid in clip_ids:
-        shutil.rmtree(clip_dir(cid), ignore_errors=True)
-
-
 # Projects
 
 @router.get("/projects")
@@ -162,11 +156,19 @@ def delete_project(pid: int) -> None:
     clips = [r["id"] for r in db.rows(
         "SELECT c.id FROM clips c JOIN sources s ON s.id = c.source_id WHERE s.project_id = ?", pid)]
     db.execute("DELETE FROM projects WHERE id = ?", pid)  # cascades to channels, sources and clips
-    _remove_files(sources, clips)
+    pipeline.remove_files(sources, clips)
     supervisor.wake()
 
 
-# Uploads and sources
+# Uploads, links and sources
+
+def _options(project: dict, **overrides) -> ProjectSettings:
+    """The project's clip settings, with any the request names instead."""
+    try:
+        return ProjectSettings(**{**project["settings"], **{k: v for k, v in overrides.items() if v is not None}})
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 
 @router.post("/projects/{pid}/upload", status_code=201)
 async def upload(pid: int, request: Request, filename: str,
@@ -176,12 +178,7 @@ async def upload(pid: int, request: Request, filename: str,
     ext = Path(filename).suffix.lower()
     if ext not in VIDEO_EXTS:
         raise HTTPException(400, f"Unsupported file type {ext or '(none)'}. Use one of: {', '.join(sorted(VIDEO_EXTS))}")
-    try:
-        options = ProjectSettings(**{**project["settings"], **{k: v for k, v in
-                                     {"length": length, "max_clips": max_clips, "template": template}.items()
-                                     if v is not None}})
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    options = _options(project, length=length, max_clips=max_clips, template=template)
     limit = settings.max_upload_bytes
     if int(request.headers.get("content-length") or 0) > limit:
         raise HTTPException(413, f"File is larger than the {limit // 2**20} MB limit")
@@ -209,6 +206,31 @@ async def upload(pid: int, request: Request, filename: str,
     return _source_out(_get("sources", sid))
 
 
+class LinkIn(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    length: Length | None = None
+    max_clips: int | None = None
+    template: str | None = None
+
+
+@router.post("/projects/{pid}/link", status_code=201)
+def add_link(pid: int, body: LinkIn) -> dict:
+    """Queue a video from a YouTube (or other site's) link. The analysis job downloads it first."""
+    project = _get("projects", pid)
+    url = body.url.strip()
+    if urlsplit(url).scheme not in ("http", "https"):
+        raise HTTPException(422, "Paste a full video link, starting with https://")
+    try:
+        platforms.check_direct_host(url)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    options = _options(project, length=body.length, max_clips=body.max_clips, template=body.template)
+    sid = db.insert("sources", project_id=pid, kind="upload", name=url[:200], ext=".mp4", status="queued",
+                    meta={**options.model_dump(), "url": url}, created_at=db.now())
+    pipeline.queue_analysis(_get("sources", sid))
+    return _source_out(_get("sources", sid))
+
+
 @router.post("/sources/{sid}/reprocess")
 def reprocess(sid: int) -> dict:
     src = _get("sources", sid)
@@ -225,7 +247,7 @@ def delete_source(sid: int) -> None:
     _get("sources", sid)
     clips = [r["id"] for r in db.rows("SELECT id FROM clips WHERE source_id = ?", sid)]
     db.execute("DELETE FROM sources WHERE id = ?", sid)
-    _remove_files([sid], clips)
+    pipeline.remove_files([sid], clips)
 
 
 # Clips
@@ -287,7 +309,7 @@ def download_clip(cid: int) -> FileResponse:
 def delete_clip(cid: int) -> None:
     _get("clips", cid)
     db.execute("DELETE FROM clips WHERE id = ?", cid)
-    _remove_files([], [cid])
+    pipeline.remove_files([], [cid])
 
 
 # Templates, queue and system
@@ -325,6 +347,7 @@ def system() -> dict:
                 "host": re.sub(r"^https?://([^/]+).*$", r"\1", settings.llm_base_url) if llm else None},
         "live_enabled": settings.live_enabled,
         "workers": settings.workers,
+        "keep_hours": settings.keep_hours,
         "disk_free_bytes": disk.free,
         "templates": len(TEMPLATES),
     }
