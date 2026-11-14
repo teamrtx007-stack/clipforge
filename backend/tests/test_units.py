@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from app import camera, captions, describe, highlights, render
+from app.config import Provider
 from app.highlights import LENGTHS, Candidate, Word
 from app.live import chat, platforms, signals
 
@@ -88,18 +89,18 @@ class TestDescribe:
         assert describe.heuristic(self._cand("", ())).title.startswith("Highlight at")
 
     def test_unreachable_llm_keeps_local_titles(self, override):
-        override(llm_base_url="http://127.0.0.1:9", llm_model="x")
+        override(text_providers=(Provider("custom", "http://127.0.0.1:9", "x"),))
         out = describe.describe([self._cand("Is this the best idea ever? It really is.")])
         assert out[0].title == "Is this the best idea ever?"
 
     def test_malformed_llm_answer_keeps_local_titles(self, override, monkeypatch):
-        override(llm_base_url="http://x", llm_model="x")
-        monkeypatch.setattr(describe, "_ask_llm", lambda items: [{"id": 0, "virality": "very high"}])
+        override(text_providers=(Provider("custom", "http://x", "x"),))
+        monkeypatch.setattr(describe, "_ask_ai", lambda items: [{"id": 0, "virality": "very high"}])
         assert describe.describe([self._cand("Is this the best idea ever? It really is.")])[0].title.startswith("Is")
 
     def test_llm_answer_is_merged(self, override, monkeypatch):
-        override(llm_base_url="http://x", llm_model="x")
-        monkeypatch.setattr(describe, "_ask_llm", lambda items: [
+        override(text_providers=(Provider("custom", "http://x", "x"),))
+        monkeypatch.setattr(describe, "_ask_ai", lambda items: [
             {"id": 0, "title": "AI title", "description": "AI desc", "hashtags": ["#a", "b"], "virality": 100,
              "reason": "great hook"}])
         out = describe.describe([self._cand("Some words here. More words there.")])

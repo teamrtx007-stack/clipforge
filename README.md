@@ -70,7 +70,8 @@ To add a template, add one entry to `backend/app/templates.py`.
 | Editing and captions | ffmpeg, libass, Montserrat and Noto fonts (OFL), bundled | Free | Rendering a 45 s clip takes about 30 to 60 s on 4 cores. Captions draw Latin, Cyrillic, Hindi and the other main Indian scripts, and Urdu/Arabic. Characters in other scripts, such as Chinese, are left out of captions instead of showing as empty boxes. |
 | Highlight detection | Local scoring code | Free | Hook and emotion word lists are English. Other languages still score on loudness, topic and pace. |
 | Titles and hashtags | Local heuristic | Free | Plainer than an LLM's titles. |
-| AI titles (optional) | Any OpenAI-compatible endpoint | Free with Ollama on your machine | If you point it at a cloud provider, that provider's free tier limits and data terms apply. ClipForge never calls one unless you set `LLM_BASE_URL`. |
+| AI titles and scoring (optional) | Gemini, Groq, Cloudflare Workers AI, OpenRouter, or Ollama | Free tiers | Each has daily limits (see [AI providers](#ai-providers)). ClipForge calls none of them unless you add its key. |
+| Cloud speech to text (optional) | Groq or Cloudflare Workers AI Whisper | Free tiers | Off unless `TRANSCRIBE_PROVIDERS` names them. They receive the audio. |
 | Video links | yt-dlp (Unlicense) with the Deno runtime (MIT) | Free | YouTube changes its site often. When links stop working, run `docker compose build --no-cache` to get the newest yt-dlp. Download only videos you own or have permission to use: YouTube's terms forbid downloading other videos. |
 | Live recording | streamlink (BSD-2) and ffmpeg | Free | Uses your bandwidth while a channel is live. Sites change often, so keep streamlink updated. |
 | Live chat | Twitch anonymous IRC | Free | Twitch only. YouTube and Kick clips use audio and speech. |
@@ -100,13 +101,46 @@ All settings are environment variables.
 | `WHISPER_MODEL` | `small` | `tiny`, `base`, `small`, `medium` or `large-v3`. Bigger is more accurate and slower |
 | `WHISPER_DEVICE` | `auto` | `cpu`, `cuda` or `auto` |
 | `LIVE_WHISPER_MODEL` | `tiny` | Model for real-time speech analysis on livestreams |
-| `LLM_BASE_URL` | unset | OpenAI-compatible endpoint, for example `http://localhost:11434/v1` for Ollama |
-| `LLM_MODEL` | unset | Model name at that endpoint, for example `llama3.2:3b` |
-| `LLM_API_KEY` | unset | Only for endpoints that need a key |
+| `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | unset | Turn on that AI text provider |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | unset | Turn on Cloudflare Workers AI (both are needed) |
+| `TEXT_PROVIDERS` | every one with a key | Order to try text providers, for example `groq,gemini` |
+| `GEMINI_MODEL`, `GROQ_MODEL`, `CLOUDFLARE_MODEL`, `OPENROUTER_MODEL` | see below | Model override per provider |
+| `TRANSCRIBE_PROVIDERS` | `local` | Order to try speech to text: `local`, `groq`, `cloudflare` |
+| `TRANSCRIBE_LANGUAGE` | detect | Force the spoken language, for example `hi` |
+| `GROQ_WHISPER_MODEL`, `CLOUDFLARE_WHISPER_MODEL` | see below | Speech model override |
+| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | unset | Any other OpenAI-compatible endpoint, for example Ollama at `http://localhost:11434/v1`. Tried first |
 | `MAX_UPLOAD_MB` | `8192` | Largest upload accepted. Videos longer than 12 hours are rejected |
 | `WORKERS` | `1` | Jobs processed at the same time. Each one uses all CPU cores, so raise it only on big machines |
 | `LIVE_ENABLED` | `1` | Set to `0` to turn off live monitoring |
 | `KEEP_HOURS` | `24` | Hours after which videos and their clips are deleted. `0` keeps everything |
+
+## AI providers
+
+Everything works without a key. Keys add better titles, AI clip scoring in any language, and faster speech to text on computers without a GPU. Put them in `.env` (copy `.env.example`); `.env` is ignored by Git. Then check them with one tiny request each:
+
+```bash
+docker compose exec clipforge python -m app.ai
+```
+
+| Task | Default | Free cloud options, in the order tried |
+|---|---|---|
+| Speech to text | Local faster-whisper | Groq `whisper-large-v3-turbo`, Cloudflare `@cf/openai/whisper-large-v3-turbo` |
+| Titles, descriptions, hashtags | Local heuristic | Gemini `gemini-2.5-flash`, Groq `openai/gpt-oss-120b`, Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, OpenRouter `openrouter/free` |
+| Clip scoring | Local signals | The same text provider rates each candidate; its score is 40% of the final score and picks which clips make the cut |
+| Live moment detection | Local (audio, Whisper `tiny`, chat) | None: a cloud call every few seconds per stream would spend a free quota in hours |
+
+If a provider fails, times out or runs out of its free quota, the next one takes over, and the local model is the last step. Speech goes ten minutes at a time, and finished parts are saved, so a retry never spends quota twice.
+
+Free limits as published in November 2026. They change often, so check each console:
+
+| Provider | Free limit | About |
+|---|---|---|
+| Groq Whisper | 28,800 audio seconds a day, 2,000 requests a day, 25 MB per file | 8 hours of audio a day |
+| Cloudflare Workers AI | 10,000 Neurons a day, shared by all models | About 214 minutes of Whisper a day, or about 50 title requests |
+| Gemini API | Set per project, shown in AI Studio; lowered several times since 2025 | Enough for titles on a few dozen videos a day |
+| OpenRouter `:free` models | 20 requests a minute, 50 a day (1,000 after a one-time $10 credit purchase) | Fallback only |
+
+Privacy: a cloud provider receives the audio or transcript you send it, and free tiers may use it to improve their models. Local processing sends nothing.
 
 ## How it works
 

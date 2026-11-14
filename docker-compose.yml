@@ -9,6 +9,10 @@ services:
       # A Docker volume, not a folder on this computer: on Windows and macOS a shared folder is slow
       # for big videos and can break the database's file locking. Download clips from the app.
       - data:/data
+    # AI keys and settings from .env (see .env.example). The file is optional.
+    env_file:
+      - path: .env
+        required: false
     environment:
       APP_PASSWORD: ${APP_PASSWORD:-}
       # Safe only because the port above is bound to 127.0.0.1.

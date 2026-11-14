@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import wave
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,17 @@ def run(args: list[str]) -> str:
 def temp_path(path: Path) -> Path:
     """Sibling path that keeps the extension, because ffmpeg picks the format from it."""
     return path.with_name(f"{path.stem}.tmp{path.suffix}")
+
+
+@contextmanager
+def writing(path: Path) -> Iterator[Path]:
+    """Yield a temp sibling to write. It replaces `path` only when complete, and is deleted if writing fails."""
+    tmp = temp_path(path)
+    try:
+        yield tmp
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -81,10 +93,16 @@ def probe(path: Path) -> Probe:
 
 
 def extract_audio(video: Path, wav: Path) -> None:
-    tmp = temp_path(wav)
-    run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(video), "-vn", "-ac", "1",
-         "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le", str(tmp)])
-    tmp.replace(wav)
+    with writing(wav) as tmp:
+        run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(video), "-vn", "-ac", "1",
+             "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le", str(tmp)])
+
+
+def compress_audio(wav: Path, start: float, duration: float, out: Path) -> None:
+    """A slice of the WAV as 64 kb/s mono MP3: ten minutes is about 4.8 MB, under free-tier upload limits."""
+    with writing(out) as tmp:
+        run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{duration:.3f}",
+             "-i", str(wav), "-ac", "1", "-c:a", "libmp3lame", "-b:a", "64k", str(tmp)])
 
 
 def loudness_curve(wav: Path) -> np.ndarray:
@@ -126,20 +144,18 @@ def frames(video: Path, start: float, duration: float, width: int, height: int, 
 
 
 def thumbnail(video: Path, at: float, out: Path) -> None:
-    tmp = temp_path(out)
-    run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-ss", f"{max(at, 0):.3f}", "-i", str(video),
-         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", str(tmp)])
-    tmp.replace(out)
+    with writing(out) as tmp:
+        run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-ss", f"{max(at, 0):.3f}", "-i", str(video),
+             "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "3", str(tmp)])
 
 
 def concat(parts: list[Path], out: Path) -> None:
     """Join stream segments without re-encoding."""
     listing = out.with_suffix(".txt")
     listing.write_text("".join(f"file '{p.resolve()}'\n" for p in parts))
-    tmp = temp_path(out)
     try:
-        run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
-             "-c", "copy", "-movflags", "+faststart", str(tmp)])
+        with writing(out) as tmp:
+            run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+                 "-c", "copy", "-movflags", "+faststart", str(tmp)])
     finally:
         listing.unlink(missing_ok=True)
-    tmp.replace(out)

@@ -1,15 +1,14 @@
 """Titles, descriptions and hashtags for clips.
 
-A local heuristic always works. If LLM_BASE_URL is set, any OpenAI-compatible endpoint
-(Ollama, LM Studio, Groq, Gemini, OpenRouter) rewrites them and adds a virality score.
-On any LLM error the heuristic result stands.
+A local heuristic always works. When an AI text provider is configured (see ai.py), it rewrites them,
+in the clip's own language, and adds a virality score that reranks the clips. On any AI error the
+heuristic result stands.
 """
-import json
 import logging
 import re
-import urllib.request
 from dataclasses import dataclass, replace
 
+from . import ai
 from .config import settings
 from .highlights import FILLER_START, Candidate, fmt_time
 
@@ -62,28 +61,15 @@ PROMPT = """You write titles for short vertical videos (TikTok, Reels, YouTube S
 For each clip transcript below, return JSON: {"clips": [{"id": <id>, "title": "<max 70 chars, punchy, no quotes>",
 "description": "<1-2 sentences>", "hashtags": ["#tag", ...3-5 tags], "virality": <0-100>, "reason": "<max 8 words>"}]}.
 Judge virality by hook strength, emotion, surprise and whether the clip makes sense on its own.
-Write in the transcript's language.
+Write in the transcript's language and script. Return only the JSON object.
 
 """
 
 
-def _ask_llm(items: list[Described]) -> list[dict]:
-    body = PROMPT + "\n\n".join(f"Clip {i}:\n{d.candidate.text[:1500]}" for i, d in enumerate(items))
-    req = urllib.request.Request(
-        f"{settings.llm_base_url}/chat/completions",
-        data=json.dumps({
-            "model": settings.llm_model,
-            "messages": [{"role": "user", "content": body}],
-            "temperature": 0.4,
-            "response_format": {"type": "json_object"},
-        }).encode(),
-        headers={"Content-Type": "application/json",
-                 **({"Authorization": f"Bearer {settings.llm_api_key}"} if settings.llm_api_key else {})},
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        content = json.load(resp)["choices"][0]["message"]["content"]
-    match = re.search(r"\{.*\}", content, re.DOTALL)  # some models wrap the JSON in prose or fences
-    return json.loads(match.group(0) if match else content)["clips"]
+def _ask_ai(items: list[Described]) -> list[dict]:
+    """One request for all clips, to spend as little free quota as possible."""
+    body = PROMPT + "\n\n".join(f"Clip {i}:\n{d.candidate.text[:1000]}" for i, d in enumerate(items))
+    return ai.chat_json(body)[0]["clips"]
 
 
 def _merge(d: Described, ai: dict) -> Described:
@@ -105,12 +91,12 @@ def _merge(d: Described, ai: dict) -> Described:
 
 def describe(candidates: list[Candidate]) -> list[Described]:
     out = [heuristic(c) for c in candidates]
-    if not (settings.llm_base_url and settings.llm_model) or not out:
+    if not settings.text_providers or not out:
         return out
     try:
-        by_id = {int(a["id"]): a for a in _ask_llm(out) if isinstance(a, dict) and "id" in a}
+        by_id = {int(a["id"]): a for a in _ask_ai(out) if isinstance(a, dict) and "id" in a}
         merged = [_merge(d, by_id[i]) if i in by_id else d for i, d in enumerate(out)]
     except Exception as exc:  # the model's JSON is untrusted input; any surprise keeps the local titles
-        log.warning("LLM titles failed, keeping the local ones: %s", exc)
+        log.warning("AI titles failed, keeping the local ones: %s", exc)
         return out
     return sorted(merged, key=lambda d: -d.candidate.score)

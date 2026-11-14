@@ -34,6 +34,11 @@ export const LENGTH_LABELS = {
   long: "Long, 60 to 90 s",
 } as const;
 
+/** "Whisper small", or the cloud order such as "groq → Whisper small". */
+export function speechLabel(system: { whisper_model: string; transcription: string[] }): string {
+  return system.transcription.map((p) => (p === "local" ? `Whisper ${system.whisper_model}` : p)).join(" → ");
+}
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export const CHANNEL_STATUS = {
