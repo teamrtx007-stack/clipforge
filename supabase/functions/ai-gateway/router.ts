@@ -41,7 +41,7 @@ export interface Deps {
   now?: () => number;
 }
 
-type Kind = "chat" | "audio";
+type Kind = "chat" | "audio" | "probe";
 const LIMITS = {
   chatBytes: 512 * 1024,
   audioBytes: 25 * 1024 * 1024,
@@ -49,8 +49,8 @@ const LIMITS = {
   contentChars: 200_000,
   maxTokens: 8192,
 };
-const DEADLINE: Record<Kind, number> = { chat: 110_000, audio: 140_000 }; // Supabase stops a free-plan function at 150 s
-const PER_ATTEMPT: Record<Kind, number> = { chat: 60_000, audio: 120_000 };
+const DEADLINE: Record<Kind, number> = { chat: 110_000, audio: 140_000, probe: 30_000 }; // Supabase stops a free-plan function at 150 s
+const PER_ATTEMPT: Record<Kind, number> = { chat: 45_000, audio: 120_000, probe: 25_000 };
 
 class GatewayError extends Error {
   constructor(
@@ -271,6 +271,8 @@ async function run<T>(
           }),
         );
         if (!p) break; // every key of this provider would fail the same request
+        // Overloaded, down or timed out: the provider's other keys would wait or fail the same way.
+        if (err.status === 0 || err.status >= 500) break;
       }
     }
   }
@@ -330,40 +332,38 @@ function safeOrder(kind: Kind, deps: Deps): Provider[] {
 }
 
 async function probe(deps: Deps, requestId: string): Promise<Response> {
-  const results = [];
   const input: ChatInput = {
     messages: [{ role: "user", content: 'Reply with the word "ok".' }],
     max_tokens: 600,
     temperature: 0,
     json: false,
   };
-  for (const provider of TEXT_PROVIDERS) {
-    for (const key of deps.pools.get(provider) ?? []) {
-      const pool = new Map([[provider, [key]]]); // this key only, ignoring its cooldown
-      const started = (deps.now ?? Date.now)();
-      try {
-        await run(
-          "chat",
-          "probe",
-          [provider],
-          requestId,
-          { ...deps, pools: pool, store: freshStates(deps.store) },
-          (k, signal) => chat(k, input, deps.env, deps.fetch, signal),
-          () => ({}),
-        );
-        results.push({ provider, key_id: key.id, ok: true, latency_ms: (deps.now ?? Date.now)() - started });
-      } catch (err) {
-        const attempt = (err as GatewayError).extra?.attempts as Attempt[] | undefined;
-        results.push({
-          provider,
-          key_id: key.id,
-          ok: false,
-          status: attempt?.[0]?.status ?? null,
-          error: attempt?.[0]?.error ?? (err as Error).message,
-        });
-      }
+  const keys = TEXT_PROVIDERS.flatMap((provider) => (deps.pools.get(provider) ?? []).map((key) => ({ provider, key })));
+  // All keys at once, so the check takes as long as the slowest key rather than all of them added up.
+  const results = await Promise.all(keys.map(async ({ provider, key }) => {
+    const started = (deps.now ?? Date.now)();
+    try {
+      await run(
+        "probe",
+        "probe",
+        [provider],
+        requestId,
+        { ...deps, pools: new Map([[provider, [key]]]), store: freshStates(deps.store) }, // this key only, cooldown ignored
+        (k, signal) => chat(k, input, deps.env, deps.fetch, signal),
+        () => ({}),
+      );
+      return { provider, key_id: key.id, ok: true, latency_ms: (deps.now ?? Date.now)() - started };
+    } catch (err) {
+      const attempt = (err as GatewayError).extra?.attempts as Attempt[] | undefined;
+      return {
+        provider,
+        key_id: key.id,
+        ok: false,
+        status: attempt?.[0]?.status ?? null,
+        error: attempt?.[0]?.error ?? (err as Error).message,
+      };
     }
-  }
+  }));
   return reply(200, { results });
 }
 

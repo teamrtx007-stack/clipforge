@@ -146,9 +146,12 @@ Deno.test("validates input and routes", async () => {
   eq(deps.calls.length, 0);
 });
 
-Deno.test("gemini goes first, through its native API, and thinking text is dropped", async () => {
+Deno.test("gemini uses its native API, and thinking text is dropped", async () => {
   const deps = await gateway();
-  const res = await handle(req("/v1/chat/completions", { ...CHAT, response_format: { type: "json_object" } }), deps);
+  const res = await handle(
+    req("/v1/providers/gemini/chat/completions", { ...CHAT, response_format: { type: "json_object" } }),
+    deps,
+  );
   const body = await res.json();
   eq(res.status, 200);
   eq(body.provider, "gemini");
@@ -190,22 +193,39 @@ Deno.test("keys of one provider take turns", async () => {
   ]);
 });
 
-Deno.test("a spent quota cools the key, the next key and provider take over, and later requests skip it", async () => {
+Deno.test("groq goes first; a spent quota cools the key, the next key and provider take over, and later requests skip it", async () => {
   const net = fakeNet({
-    gemini: [
-      { status: 429, body: { error: { details: [{ retryDelay: "40s" }] } } },
+    groq: [
+      { status: 429, body: "", headers: { "retry-after": "40" } },
       { status: 429, body: "quota exceeded" },
     ],
   });
   const deps = await gateway(net);
   const first = await handle(req("/v1/chat/completions", CHAT), deps);
-  eq((await first.json()).provider, "groq", "after both Gemini keys hit 429");
+  eq((await first.json()).provider, "gemini", "after both Groq keys hit 429");
   eq(net.calls.length, 3);
   const second = await handle(req("/v1/chat/completions", CHAT), deps);
-  eq((await second.json()).provider, "groq");
-  eq(net.calls.length, 4, "cooling Gemini keys are not tried again");
+  eq((await second.json()).provider, "gemini");
+  eq(net.calls.length, 4, "cooling Groq keys are not tried again");
   const health = await (await handle(req("/v1/health", undefined, {}, "GET"), deps)).json();
-  eq(health.providers.gemini.keys.map((k: any) => k.state), ["cooling", "cooling"]);
+  eq(health.providers.groq.keys.map((k: any) => k.state), ["cooling", "cooling"]);
+  eq(health.text_order.slice(0, 2), ["groq", "gemini"]);
+});
+
+Deno.test("an overloaded provider is left at once, without trying its other key", async () => {
+  const net = fakeNet({ groq: [{ status: 503, body: { error: { message: "high demand" } } }] });
+  const deps = await gateway(net);
+  eq((await (await handle(req("/v1/chat/completions", CHAT), deps)).json()).provider, "gemini");
+  eq(net.calls.length, 2, "one Groq try, then Gemini");
+});
+
+Deno.test("a key that needs paid credits is benched for a day", async () => {
+  const net = fakeNet({ ollama: [{ status: 402, body: { error: { message: "Add usage credits or subscribe" } } }] });
+  const deps = await gateway(net);
+  eq((await handle(req("/v1/providers/ollama/chat/completions", CHAT), deps)).status, 502);
+  const again = await handle(req("/v1/providers/ollama/chat/completions", CHAT), deps);
+  eq((await again.json()).error.code, "all_keys_cooling");
+  eq(net.calls.length, 1, "not tried again");
 });
 
 Deno.test("a refused key is benched for a day and shows as refused", async () => {
@@ -226,12 +246,12 @@ Deno.test("a refused key is benched for a day and shows as refused", async () =>
 });
 
 Deno.test("a bad request skips to the next provider without blaming the key", async () => {
-  const net = fakeNet({ gemini: [{ status: 400, body: "unsupported parameter" }] });
+  const net = fakeNet({ groq: [{ status: 400, body: "unsupported parameter" }] });
   const deps = await gateway(net);
-  eq((await (await handle(req("/v1/chat/completions", CHAT), deps)).json()).provider, "groq");
-  eq(net.calls.length, 2, "the second Gemini key is not tried with the same bad request");
+  eq((await (await handle(req("/v1/chat/completions", CHAT), deps)).json()).provider, "gemini");
+  eq(net.calls.length, 2, "the second Groq key is not tried with the same bad request");
   const health = await (await handle(req("/v1/health", undefined, {}, "GET"), deps)).json();
-  eq(health.providers.gemini.keys.map((k: any) => k.state), ["ready", "ready"]);
+  eq(health.providers.groq.keys.map((k: any) => k.state), ["ready", "ready"]);
 });
 
 Deno.test("speech to text: Groq first, Cloudflare when Groq is out of quota", async () => {

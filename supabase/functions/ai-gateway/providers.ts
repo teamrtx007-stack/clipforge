@@ -55,9 +55,11 @@ export class UpstreamError extends Error {
 
 // Model IDs checked November 2026. Each can be overridden with a secret, e.g. GROQ_MODEL or GROQ_WHISPER_MODEL.
 export const DEFAULT_MODELS = {
+  // Key order is the default routing order. Groq first: it answers in seconds, while Gemini's free models
+  // are often overloaded (503 "high demand") and slow to fail.
   text: {
-    gemini: "gemini-3.8-flash", // gemini-2.5-flash is closed to new accounts
     groq: "openai/gpt-oss-120b",
+    gemini: "gemini-3.8-flash", // gemini-2.5-flash is closed to new accounts
     ollama: "gemma4:31b", // Ollama Cloud; list current names with GET https://ollama.com/api/tags
     cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     openrouter: "openrouter/free",

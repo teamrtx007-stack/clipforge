@@ -38,10 +38,10 @@ Answers carry `x-request-id`, `x-gateway-provider` and `x-gateway-key-id`. Error
 
 | Task | Order | Why |
 |---|---|---|
-| Titles, descriptions, hashtags, clip scoring | Gemini → Groq → Ollama Cloud → Cloudflare → OpenRouter | Gemini writes the best Hindi and English; the rest are fallbacks |
+| Titles, descriptions, hashtags, clip scoring | Groq → Gemini → Ollama Cloud → Cloudflare → OpenRouter | Groq answers in seconds; Gemini's free models are often overloaded and slow to fail, so it is the fallback |
 | Speech to text | Groq → Cloudflare | Groq Whisper is fast and allows about 8 h of audio a day per key; Cloudflare's daily Neurons cover about 3.5 h |
 
-Change the order with the `AI_TEXT_ORDER` and `AI_SPEECH_ORDER` secrets, for example `groq,gemini`.
+Change the order with the `AI_TEXT_ORDER` and `AI_SPEECH_ORDER` secrets, for example `gemini,groq`.
 
 **Within a provider.** All of a provider's keys form one pool. Each request takes the key that was used least recently, so traffic spreads evenly and two free keys give about twice the free quota.
 
@@ -51,7 +51,8 @@ Change the order with the `AI_TEXT_ORDER` and `AI_SPEECH_ORDER` secrets, for exa
 |---|---|---|---|
 | 429 | Rate limit or free quota spent | Cools for `Retry-After` (or Gemini's `retryDelay`), at least 1 min, doubling with each failure in a row up to 1 h | Next key, then next provider |
 | 401, 403 | Key refused | Benched for 24 h, shown as `refused` in `/health` | Next key, then next provider |
-| 5xx, timeout, network error | Provider trouble | Cools 30 s, doubling up to 10 min | Next key, then next provider |
+| 402 | The provider wants payment (no free credits left) | Benched for 24 h | Next key, then next provider |
+| 5xx, timeout, network error | Provider overloaded or down | Cools 30 s, doubling up to 10 min | Next provider at once: its other keys would wait or fail the same way |
 | 400, 404, 413, 422 | Our request does not fit this provider | Not blamed | Next provider (other keys would fail the same way) |
 
 A success resets the key's strikes. Each attempt has its own timeout (60 s text, 120 s audio), and the whole request stops trying before Supabase's 150 s limit. If every key is cooling, the answer is 503 with a `Retry-After`. If every attempt failed, it is 502 with the list of attempts, already redacted.
