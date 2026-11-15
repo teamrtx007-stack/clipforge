@@ -1,4 +1,5 @@
-"""Background job queue on SQLite. Only this module knows how jobs are stored and claimed."""
+"""Background job queue in the database (SQLite, or PostgreSQL with row locks). Only this module knows how jobs are
+stored and claimed."""
 import logging
 import threading
 import traceback
@@ -40,7 +41,8 @@ def enqueue(kind: str, target_id: int, priority: int = 0) -> None:
     db.execute(
         """INSERT INTO jobs (kind, target_id, status, priority, created_at, updated_at)
            SELECT ?, ?, 'queued', ?, ?, ?
-           WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE kind = ? AND target_id = ? AND status = 'queued')""",
+           WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE kind = ? AND target_id = ? AND status = 'queued')
+           """ + db.on_conflict_ignore(),
         kind, target_id, priority, t, t, kind, target_id,
     )
     _wake.set()
@@ -48,11 +50,12 @@ def enqueue(kind: str, target_id: int, priority: int = 0) -> None:
 
 def claim(min_priority: int = 0) -> dict | None:
     # One statement, so two workers can never take the same job. rows() drains the cursor,
-    # which ends the statement and commits the claim before the job starts.
+    # which ends the statement and commits the claim before the job starts. On PostgreSQL the row lock
+    # (SKIP LOCKED) does the same for workers on other machines.
     claimed = db.rows(
-        """UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = ?
+        f"""UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = ?
            WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND priority >= ?
-                       ORDER BY priority DESC, id LIMIT 1)
+                       ORDER BY priority DESC, id LIMIT 1 {db.skip_locked()})
            RETURNING *""",
         db.now(), min_priority,
     )

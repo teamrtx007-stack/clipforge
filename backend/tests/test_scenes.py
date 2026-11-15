@@ -165,6 +165,6 @@ def test_analysis_of_a_real_video_keeps_every_clip_inside_one_place(tmp_path, mo
     assert db.one("SELECT status FROM sources WHERE id = ?", sid)["status"] == "ready"
     saved = json.loads((source_dir(sid) / "scenes.json").read_text())
     assert saved["context_changes"] == [30.0]
-    clips = db.rows("SELECT start, end FROM clips WHERE source_id = ?", sid)
+    clips = db.rows('SELECT start, "end" FROM clips WHERE source_id = ?', sid)
     assert clips, "clips are still found"
     assert all(not scenes.crossing(saved, c["start"], c["end"]) for c in clips), clips

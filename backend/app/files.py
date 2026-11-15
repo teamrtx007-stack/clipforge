@@ -75,7 +75,8 @@ def _upsert(store: storage.ObjectStorage, file_type: str, owner_id: int, key: st
 
 def usage(name: str) -> int:
     """Bytes ClipForge keeps in one provider, by its own records."""
-    return db.one("""SELECT COALESCE(SUM(file_size), 0) AS n FROM files
+    # CAST: PostgreSQL's SUM of whole numbers is a decimal, which cannot be compared with the float limit.
+    return db.one("""SELECT CAST(COALESCE(SUM(file_size), 0) AS BIGINT) AS n FROM files
                      WHERE storage_provider = ? AND upload_status IN ('uploaded', 'deleting')""", name)["n"]
 
 

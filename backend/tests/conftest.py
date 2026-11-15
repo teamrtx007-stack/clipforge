@@ -11,6 +11,11 @@ os.environ.setdefault("WHISPER_MODEL", "tiny")
 os.environ["LIVE_ENABLED"] = "0"
 os.environ.pop("APP_PASSWORD", None)
 os.environ.pop("LLM_BASE_URL", None)
+# The suite runs on SQLite unless CLIPFORGE_TEST_DATABASE_URL names a throwaway PostgreSQL database, which it
+# wipes. A DATABASE_URL from the environment is never used: tests must not touch a real database.
+os.environ.pop("DATABASE_URL", None)
+if test_db := os.environ.get("CLIPFORGE_TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = test_db
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -19,7 +24,13 @@ ASSETS = Path(__file__).parent / "assets"
 def database():
     from app import db
 
+    if os.environ.get("DATABASE_URL"):
+        with db._postgres_pool().connection() as c:
+            c.execute(f"DROP SCHEMA IF EXISTS {db.POSTGRES_SCHEMA} CASCADE")  # a fresh, empty test database
+        db.create_postgres_schema()
     db.init()
+    yield
+    db.close()
 
 
 @pytest.fixture(scope="session")

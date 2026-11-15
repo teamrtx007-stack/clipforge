@@ -91,6 +91,9 @@ class Settings:
     live_enabled: bool
     keep_hours: float
     scene_detection: bool = True  # keep clips inside one scene; off restores the old, transcript-only choice
+    # PostgreSQL (Supabase) instead of SQLite. Unset (the default) keeps SQLite. Holds a password: never logged.
+    database_url: str | None = field(default=None, repr=False)
+    db_pool_size: int = 5  # PostgreSQL connections shared by all threads; Supabase's free tier allows few
 
 
 def _names(value: str | None, allowed) -> tuple[str, ...]:
@@ -160,6 +163,8 @@ def _load() -> Settings:
         live_enabled=env("LIVE_ENABLED", "1") != "0",
         keep_hours=float(env("KEEP_HOURS", "24")),
         scene_detection=env("SCENE_DETECTION", "1") != "0",
+        database_url=env("DATABASE_URL") or None,
+        db_pool_size=max(1, int(env("DB_POOL_SIZE", "5"))),
     )
 
 

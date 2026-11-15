@@ -385,6 +385,7 @@ def system() -> dict:
     ai = settings.text_providers[0] if settings.text_providers else None
     return {
         "whisper_model": settings.whisper_model,
+        "database": db.kind(),
         "llm": {"enabled": bool(ai), "model": f"{ai.name}: {ai.model}" if ai else None, "host": ai.name if ai else None,
                 "fallbacks": [p.name for p in settings.text_providers[1:]]},
         "transcription": list(settings.transcribe_providers),
@@ -406,9 +407,11 @@ def stats(tz_offset: int = 0, days: int = 14) -> dict:
     Date.getTimezoneOffset(): minutes behind UTC, so India is -330."""
     days, shift = min(max(days, 1), 30), -min(max(tz_offset, -900), 900) * 60
     today = datetime.fromtimestamp(db.now() + shift, timezone.utc).date()
-    counts = {(r["day"], r["kind"]): r["n"] for r in db.rows(
-        """SELECT date(at + ?, 'unixepoch') AS day, kind, COUNT(*) AS n FROM activity
-           WHERE at >= ? GROUP BY day, kind""", shift, db.now() - (days + 1) * 86400)}
+    # Days are counted here, not in SQL: SQLite and PostgreSQL turn timestamps into dates differently.
+    counts: dict[tuple[str, str], int] = {}
+    for r in db.rows("SELECT at, kind FROM activity WHERE at >= ?", db.now() - (days + 1) * 86400):
+        day = datetime.fromtimestamp(r["at"] + shift, timezone.utc).date().isoformat()
+        counts[day, r["kind"]] = counts.get((day, r["kind"]), 0) + 1
     dates = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
     return {
         "days": [{"day": d, **{k + "s": counts.get((d, k), 0) for k in ("video", "clip", "moment")}} for d in dates],
