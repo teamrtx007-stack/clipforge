@@ -2,8 +2,11 @@
 uploads, signed downloads, verified backups, restore, retention, outages and quota. No real cloud is called."""
 import json
 import socket
+import time
 import urllib.request
 from dataclasses import replace
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import boto3
 import pytest
@@ -271,10 +274,107 @@ def test_real_pipeline_with_cloud_storage_and_a_fresh_machine(s3, talking_video)
     assert (source_dir(sid) / "original.mp4").exists(), "the source came back from R2"
 
 
-def test_check_command_round_trips_both_buckets(s3, capsys):
+def _provider_honours_expiry(monkeypatch):
+    """moto serves expired signed links; R2 and B2 refuse them. Make the check's fetches behave like R2 and B2,
+    judging expiry from the link's own X-Amz-Date and X-Amz-Expires, and keep the waits short."""
+    real = storage._fetch
+
+    def fetch(url):
+        q = parse_qs(urlparse(url).query)
+        signed = datetime.strptime(q["X-Amz-Date"][0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+        return (403, b"") if time.time() > signed + int(q["X-Amz-Expires"][0]) else real(url)
+
+    monkeypatch.setattr(storage, "_fetch", fetch)
+    monkeypatch.setattr(storage, "LINK_TEST_SECONDS", 2)
+    monkeypatch.setattr(storage, "LINK_TEST_WAIT", 3)
+
+
+def test_check_command_round_trips_both_buckets(s3, capsys, monkeypatch):
+    """The live check: each bucket, link expiry, then backup R2 -> B2 and restore B2 -> R2, leaving nothing behind."""
+    client, _ = s3
+    _provider_honours_expiry(monkeypatch)
     assert storage.check() == 0
     out = capsys.readouterr().out
-    assert "ok    r2 bucket r2-bucket" in out and "ok    b2 bucket b2-bucket" in out and "secret" not in out
+    assert "ok    r2 bucket r2-bucket: upload, verify, signed URL, link expiry, download, delete" in out
+    assert "ok    b2 bucket b2-bucket" in out
+    assert "ok    backup r2 -> b2 and restore b2 -> r2: size and checksum verified" in out
+    assert "secret" not in out and "FAIL" not in out and "note" not in out
+    assert _keys(client, "r2-bucket") == [] and _keys(client, "b2-bucket") == [], "test files are cleaned up"
+    assert db.one("SELECT COUNT(*) AS n FROM files")["n"] == 0, "the check never writes to the database"
+    assert not list((files.settings.data_dir / "tmp").glob("storage-check-*"))
+
+
+def test_check_fails_when_an_expired_link_still_works(s3, capsys, monkeypatch):
+    client, _ = s3
+    monkeypatch.setattr(storage, "LINK_TEST_SECONDS", 1)
+    monkeypatch.setattr(storage, "LINK_TEST_WAIT", 0)
+    assert storage.check() == 1  # moto as is: the link keeps working, as a misbehaving provider would
+    out = capsys.readouterr().out
+    assert "FAIL  r2 bucket r2-bucket: link expiry: an expired link still worked" in out
+    assert "backup r2 -> b2" not in out, "no backup test on buckets that failed"
+    assert _keys(client, "r2-bucket") == [] and _keys(client, "b2-bucket") == []
+
+
+def test_check_notes_b2_hidden_versions_and_removes_its_own(s3, capsys, monkeypatch):
+    """B2 keeps deleted files as hidden versions that still count toward the free 10 GB."""
+    client, _ = s3
+    client.put_bucket_versioning(Bucket="b2-bucket", VersioningConfiguration={"Status": "Enabled"})
+    _provider_honours_expiry(monkeypatch)
+    assert storage.check() == 0
+    out = capsys.readouterr().out
+    assert "note  b2 bucket b2-bucket keeps deleted files as hidden versions" in out
+    versions = client.list_object_versions(Bucket="b2-bucket")
+    assert not versions.get("Versions") and not versions.get("DeleteMarkers"), "the check's own test file is fully gone"
+
+
+def test_check_reports_a_failed_restore(s3, capsys, monkeypatch):
+    _provider_honours_expiry(monkeypatch)
+    r2, calls = storage.provider("r2"), []
+    real_verify = r2.verify
+
+    def verify(*args):
+        calls.append(args)
+        return real_verify(*args) and len(calls) < 2  # the bucket check passes, the restore's verify fails
+    monkeypatch.setattr(r2, "verify", verify)
+    assert storage.check() == 1
+    assert "FAIL  restore b2 -> r2: restore verify (size and checksum)" in capsys.readouterr().out
+
+
+def test_signed_links_carry_their_expiry_and_short_ones_are_not_reused(s3):
+    store = storage.provider("r2")
+    hour = parse_qs(urlparse(store.url("k")).query)
+    assert hour["X-Amz-Expires"] == ["3600"]
+    short = store.url("k", expires=5)
+    assert parse_qs(urlparse(short).query)["X-Amz-Expires"] == ["5"]
+    assert store.url("k") == store.url("k"), "hour-long links are reused while polling"
+    assert store.url("k", expires=5) not in (store.url("k"),), "a short link never replaces the cached hour-long one"
+
+
+def test_errors_carry_the_providers_explanation_but_never_the_keys(s3, override):
+    from botocore.exceptions import ClientError
+    client, buckets = s3
+    override(buckets={**buckets, "r2": replace(buckets["r2"], bucket="no-such-bucket")})
+    storage.provider.cache_clear()
+    store = storage.provider("r2")
+    with pytest.raises(storage.StorageError, match=r"r2: upload failed \(NoSuchBucket: The specified bucket does not exist\)"):
+        store.put("k", _clip_file(9011), "video/mp4")
+    leaked = ClientError({"Error": {"Code": "InvalidArgument",
+                                    "Message": "Credential access key has length 31, should be 32 (test r2-secret-value)"}},
+                         "PutObject")
+    message = str(store._error("upload", leaked))
+    assert "Credential access key has length 31, should be 32" in message
+    assert "r2-secret-value" not in message and "***" in message
+    assert str(store._error("upload", ConnectionResetError())) == "r2: upload failed (ConnectionResetError)"
+
+
+def test_a_failed_large_upload_is_a_storage_error(s3, override, monkeypatch):
+    """Files over 100 MB go up in parts, and boto3 reports a failed multipart upload with its own error type."""
+    _, buckets = s3
+    override(buckets={**buckets, "r2": replace(buckets["r2"], bucket="no-such-bucket")})
+    storage.provider.cache_clear()
+    monkeypatch.setattr(storage, "SINGLE_PUT_LIMIT", 0)
+    with pytest.raises(storage.StorageError, match=r"r2: upload failed \(S3UploadFailedError: .*NoSuchBucket"):
+        storage.provider("r2").put("k", _clip_file(9012), "video/mp4")
 
 
 def test_a_re_render_is_never_served_stale(s3):
