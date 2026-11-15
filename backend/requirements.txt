@@ -5,5 +5,8 @@ opencv-python-headless==5.0.0.93
 numpy==2.5.4
 streamlink==8.6.3
 boto3==1.44.3
+# PostgreSQL (Supabase), used only when DATABASE_URL is set. Binary wheels exist for x86-64 and ARM64.
+psycopg[binary,pool]==3.3.9
+psycopg-pool==3.3.3
 # A floor, not a pin: YouTube changes often and only a recent yt-dlp keeps up. Rebuild to update it.
 yt-dlp[default,deno]>=2026.10.26

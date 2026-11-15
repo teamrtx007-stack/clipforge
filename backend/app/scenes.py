@@ -162,7 +162,7 @@ def _report(source_id: int) -> int:
         print(f"  context change at {highlights.fmt_time(t)} ({t:.1f} s)")
 
     print("Current clips:")
-    for c in db.rows("SELECT id, start, end, title FROM clips WHERE source_id = ? ORDER BY start", source_id):
+    for c in db.rows('SELECT id, start, "end", title FROM clips WHERE source_id = ? ORDER BY start', source_id):
         bad = crossing(found, c["start"], c["end"])
         where = ", ".join(f"{t - c['start']:.1f} s in" for t in bad)
         print(f"  clip {c['id']} {highlights.fmt_time(c['start'])}-{highlights.fmt_time(c['end'])} "

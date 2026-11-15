@@ -17,7 +17,7 @@ Video work is heavy. Transcription, face detection and encoding use a lot of CPU
 
 ## Shape
 
-### Data (SQLite, one file)
+### Data (SQLite, one file; PostgreSQL when `DATABASE_URL` is set, see docs/DATABASE.md)
 
 ```
 Project  id, name, settings{clip_length, max_clips, template}
@@ -39,7 +39,7 @@ Files live under `data/`. Paths are derived from ids and never stored. `data/sou
 ### Load-bearing decisions
 
 - **One pipeline for uploads and live.** A live moment becomes a short `Source` of kind `live` cut from the rolling buffer. It then goes through the same analyze and render jobs as an upload. Live Studio only detects and cuts. It never renders. Per the "two ways to do one task" red flag, there is one way to make a clip.
-- **A job queue in SQLite.** A worker claims a job with one `UPDATE ... RETURNING` statement, which is atomic. On startup, jobs left `running` by a crash go back to `queued`. Every pipeline stage checks for its output file first and writes through a temp file plus rename, so a re-run skips finished work (per make-operations-idempotent).
+- **A job queue in the database.** A worker claims a job with one `UPDATE ... RETURNING` statement, which is atomic; on PostgreSQL it also takes a row lock (`FOR UPDATE SKIP LOCKED`), so workers on different machines never take the same job. On startup, jobs left `running` by a crash go back to `queued`. Every pipeline stage checks for its output file first and writes through a temp file plus rename, so a re-run skips finished work (per make-operations-idempotent).
 - **Each piece of state has one owner.** The queue owns `Job` rows. The pipeline owns `Source` and `Clip` progress and status. The live supervisor owns channel runtime state (offline, live, recording) in memory, and the API reads snapshots of it.
 - **Pure scoring code.** Highlight scoring, caption building, camera path planning and spike detection are pure functions over arrays and lists. They have no ffmpeg, database or HTTP calls, so tests cover them directly (per boundary-discipline).
 - **Registries, not branches.** Templates, caption styles, layouts and platforms are lookup tables. A new template is one entry (per model-the-domain).
@@ -64,7 +64,8 @@ These choices were measured, not guessed. On 2000 seconds of pure noise, the exp
 ```
 backend/app/
   config.py      settings from environment variables
-  db.py          sqlite connection per thread, schema, row helpers
+  db.py          SQLite (default) or PostgreSQL (DATABASE_URL): connections, schema, row helpers, backup
+  schema_postgres.sql  the same tables for PostgreSQL / Supabase (clipforge schema)
   jobs.py        queue (enqueue, claim, finish) and worker threads
   pipeline.py    analyze_source and render_clip job handlers
   media.py       ffprobe, audio extraction, loudness curve, segment concat

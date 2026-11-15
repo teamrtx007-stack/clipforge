@@ -282,7 +282,7 @@ def render_clip(clip_id: int) -> None:
         # Ready only if nobody trimmed the clip or switched its template while it rendered.
         if not db.execute(
             """UPDATE clips SET progress = 1, rendered_at = ?,
-                 status = CASE WHEN start = ? AND end = ? AND template = ? THEN 'ready' ELSE 'draft' END
+                 status = CASE WHEN start = ? AND "end" = ? AND template = ? THEN 'ready' ELSE 'draft' END
                WHERE id = ?""", db.now(), start, end, clip["template"], clip_id,
         ).rowcount:
             raise jobs.Gone()
